@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Second Brain</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="logo">◎</span>
+      <span>Second Brain</span>
+    </div>
+    <div class="status" id="status">—</div>
+    <div class="side-actions">
+      <button id="btn-recent" class="ghost">Последние воспоминания</button>
+      <button id="btn-new" class="ghost">Новый диалог (/clear)</button>
+    </div>
+    <div class="hint">
+      Команды начинаются с <code>/</code>. Например:
+      <code>/save</code>, <code>/search</code>, <code>/recent</code>,
+      <code>/summary</code>, <code>/think on</code>.
+    </div>
+  </aside>
+
+  <main class="chat">
+    <div class="messages" id="messages"></div>
+    <div class="composer">
+      <div class="cmd-hint" id="cmd-hint" hidden></div>
+      <textarea id="input" rows="1" placeholder="Напишите что-нибудь, чтобы запомнить, или /help…"></textarea>
+      <button id="send">Отправить</button>
+    </div>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
