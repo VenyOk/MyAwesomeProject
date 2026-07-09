@@ -7,6 +7,7 @@ import pytest
 
 from app.chat.commands import CommandContext
 from app.chat.session import ChatSession
+from app.chat.store import ChatStore
 from app.config import Settings
 from app.main import Services, create_app
 from app.memory.recall import RecallService
@@ -91,8 +92,10 @@ def services(tmp_path):
     recall = RecallService(store, embedder, index)
     session = ChatSession()
     llm = FakeLLM()
+    chat_store = ChatStore(tmp_path / "chats.db")
     ctx = CommandContext(
-        store=store, recall=recall, session=session, llm=llm, settings=settings
+        store=store, recall=recall, session=session, llm=llm, settings=settings,
+        chat_store=chat_store,
     )
     return Services(
         settings=settings,
@@ -101,6 +104,7 @@ def services(tmp_path):
         session=session,
         llm=llm,
         ctx=ctx,
+        chat_store=chat_store,
     )
 
 

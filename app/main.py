@@ -10,12 +10,15 @@ from fastapi.staticfiles import StaticFiles
 from app.api.routes import router as api_router
 from app.chat.commands import CommandContext
 from app.chat.session import ChatSession
+from app.chat.store import ChatStore
 from app.config import Settings, settings as default_settings
 from app.llm.gemma import GemmaLLM
 from app.memory.recall import RecallService
 from app.memory.store import MemoryStore
 
-WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+WEB_DIR = PROJECT_ROOT / "web"
+FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
 
 
 @dataclass
@@ -26,6 +29,7 @@ class Services:
     session: ChatSession
     llm: GemmaLLM
     ctx: CommandContext
+    chat_store: ChatStore
 
 
 def build_services(settings: Settings | None = None) -> Services:
@@ -33,6 +37,7 @@ def build_services(settings: Settings | None = None) -> Services:
     settings.ensure_dirs()
 
     store = MemoryStore(settings.db_path)
+    chat_store = ChatStore(settings.db_path)
 
     from app.memory.embeddings import Embedder, FaissIndex
 
@@ -50,8 +55,17 @@ def build_services(settings: Settings | None = None) -> Services:
         session=session,
         llm=llm,
         settings=settings,
+        chat_store=chat_store,
     )
-    return Services(settings=settings, store=store, recall=recall, session=session, llm=llm, ctx=ctx)
+    return Services(
+        settings=settings,
+        store=store,
+        recall=recall,
+        session=session,
+        llm=llm,
+        ctx=ctx,
+        chat_store=chat_store,
+    )
 
 
 def create_app(services: Services | None = None) -> FastAPI:
@@ -69,12 +83,14 @@ def create_app(services: Services | None = None) -> FastAPI:
         yield
         if owns_services:
             services.store.close()
+            services.chat_store.close()
 
     app = FastAPI(title="Second Brain", lifespan=lifespan)
     app.include_router(api_router, prefix="/api")
 
-    if WEB_DIR.exists():
-        app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
+    static_dir = FRONTEND_DIST_DIR if FRONTEND_DIST_DIR.exists() else WEB_DIR
+    if static_dir.exists():
+        app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="web")
 
     return app
 

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from app.chat.session import ChatSession, DEFAULT_PERSONA
+from app.chat.store import ChatStore
 from app.config import Settings
 from app.llm.gemma import clean_response
 from app.memory.recall import RecallService
@@ -18,6 +19,8 @@ class CommandContext:
     session: ChatSession
     llm: "LLMLike"
     settings: Settings
+    chat_store: ChatStore
+    current_chat_id: int | None = None
     persona: str = DEFAULT_PERSONA
 
 
@@ -154,8 +157,11 @@ def cmd_export(args: str, ctx: CommandContext) -> CommandResult:
 
 
 def cmd_clear(args: str, ctx: CommandContext) -> CommandResult:
-    ctx.session.clear()
-    return CommandResult(text="Conversation cleared (memories kept).")
+    if ctx.current_chat_id is None:
+        ctx.session.clear()
+        return CommandResult(text="Conversation cleared (memories kept).")
+    removed = ctx.chat_store.clear_messages(ctx.current_chat_id)
+    return CommandResult(text=f"Cleared {removed} message(s) in this chat (memories kept).")
 
 
 def cmd_think(args: str, ctx: CommandContext) -> CommandResult:

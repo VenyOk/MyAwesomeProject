@@ -13,11 +13,21 @@ router = APIRouter()
 
 
 class ChatRequest(BaseModel):
+    chat_id: int
     message: str
 
 
 class CommandRequest(BaseModel):
     input: str
+    chat_id: int | None = None
+
+
+class CreateChatRequest(BaseModel):
+    title: str | None = None
+
+
+class RenameChatRequest(BaseModel):
+    title: str
 
 
 def _services(request: Request):
@@ -33,7 +43,63 @@ def health(request: Request):
         "model_loaded": services.llm.is_loaded(),
         "memories": services.store.count(),
         "index_size": services.recall.index.size,
+        "chats": len(services.chat_store.list_chats()),
     }
+
+
+# ---------------------------- chats ----------------------------
+
+
+@router.get("/chats")
+def list_chats(request: Request):
+    services = _services(request)
+    chats = services.chat_store.list_chats()
+    return {"chats": [c.to_dict() for c in chats]}
+
+
+@router.post("/chats")
+def create_chat(payload: CreateChatRequest, request: Request):
+    services = _services(request)
+    chat = services.chat_store.create_chat(title=payload.title)
+    return chat.to_dict()
+
+
+@router.get("/chats/{chat_id}")
+def get_chat(chat_id: int, request: Request):
+    services = _services(request)
+    chat = services.chat_store.get(chat_id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return chat.to_dict()
+
+
+@router.patch("/chats/{chat_id}")
+def rename_chat(chat_id: int, payload: RenameChatRequest, request: Request):
+    services = _services(request)
+    chat = services.chat_store.rename(chat_id, payload.title)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return chat.to_dict()
+
+
+@router.delete("/chats/{chat_id}")
+def delete_chat(chat_id: int, request: Request):
+    services = _services(request)
+    if not services.chat_store.delete(chat_id):
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return {"deleted": chat_id}
+
+
+@router.get("/chats/{chat_id}/messages")
+def list_messages(chat_id: int, request: Request):
+    services = _services(request)
+    if services.chat_store.get(chat_id) is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    messages = services.chat_store.list_messages(chat_id)
+    return {"messages": [m.to_dict() for m in messages]}
+
+
+# ---------------------------- chat (LLM) ----------------------------
 
 
 @router.post("/chat")
@@ -43,17 +109,25 @@ def chat(payload: ChatRequest, request: Request):
     if not message:
         raise HTTPException(status_code=400, detail="Empty message")
 
+    chat = services.chat_store.get(payload.chat_id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    # global memory recall (RAG) — memories are shared across all chats
     context = services.recall.build_context(message, k=services.settings.recall_top_k)
     system = services.ctx.persona
     if context:
         system = system + "\n\n" + context
 
-    services.session.add("user", message)
+    # persist user turn + auto-save a global memory
+    user_msg = services.chat_store.add_message(chat.id, "user", message)
+    services.chat_store.maybe_title_from_first_message(chat.id, message)
     if services.settings.auto_save:
         mem = services.store.add(content=message, source="chat")
         services.recall.add_memory(mem)
 
-    messages = services.session.with_system(system)
+    history = [{"role": m.role, "content": m.content} for m in services.chat_store.list_messages(chat.id)]
+    messages = [{"role": "system", "content": system}] + history
 
     def event_stream():
         accumulated: list[str] = []
@@ -63,19 +137,27 @@ def chat(payload: ChatRequest, request: Request):
             accumulated.append(chunk)
             yield f"data: {json.dumps({'token': chunk}, ensure_ascii=False)}\n\n"
         full = clean_response("".join(accumulated))
-        services.session.add("assistant", full)
-        yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+        assistant_msg = services.chat_store.add_message(chat.id, "assistant", full)
+        title = services.chat_store.get(chat.id).title
+        yield f"data: {json.dumps({'done': True, 'user_message': user_msg.to_dict(), 'assistant_message': assistant_msg.to_dict(), 'title': title}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+# ---------------------------- commands ----------------------------
 
 
 @router.post("/command")
 def command(payload: CommandRequest, request: Request):
     services = _services(request)
+    services.ctx.current_chat_id = payload.chat_id
     result = REGISTRY.dispatch(payload.input, services.ctx)
     if result is None:
         return {"is_command": False}
     return {"is_command": True, "text": result.text, "error": result.error}
+
+
+# ---------------------------- memories ----------------------------
 
 
 @router.get("/memories")

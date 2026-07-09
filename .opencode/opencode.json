@@ -19,7 +19,7 @@
     },
     "playwright": {
       "type": "local",
-      "command": ["npx.cmd", "-y", "@playwright/mcp@latest"],
+      "command": ["npx.cmd", "-y", "@playwright/mcp@latest", "--browser", "msedge"],
       "enabled": true
     },
     "sequential-thinking": {
