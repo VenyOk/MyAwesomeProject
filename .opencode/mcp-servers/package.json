@@ -1,0 +1,18 @@
+{
+  "name": "mcp-servers",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local cache of MCP (Model Context Protocol) servers used by opencode. Preinstalled so the agent does not need to fetch them via npx on every launch.",
+  "scripts": {
+    "playwright": "node node_modules/@playwright/mcp/cli.js",
+    "context7": "node node_modules/@upstash/context7-mcp/dist/index.js",
+    "sequential-thinking": "node node_modules/@modelcontextprotocol/server-sequential-thinking/dist/index.js",
+    "fetch": "node node_modules/mcp-server-fetch-typescript/dist/index.js"
+  },
+  "dependencies": {
+    "@playwright/mcp": "latest",
+    "@upstash/context7-mcp": "latest",
+    "@modelcontextprotocol/server-sequential-thinking": "latest",
+    "mcp-server-fetch-typescript": "latest"
+  }
+}

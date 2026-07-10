@@ -1,0 +1,50 @@
+{
+  "$comment": "Canonical reference of MCP (Model Context Protocol) servers used by this project. The 'command' paths point at the preinstalled node_modules in this folder (see package.json). Remote servers (tavily, github) are loaded over HTTP and need no local install. opencode reads the active config from .opencode/opencode.json; this file documents and mirrors it. To add a server: npm install it here, add a script/command in package.json, then wire it into ../opencode.json.",
+  "mcp": {
+    "playwright": {
+      "type": "local",
+      "$desc": "Browser automation & inspection (drives real Chromium/Edge). Used for UI testing and scraping.",
+      "command": ["node", "node_modules/@playwright/mcp/cli.js", "--browser", "msedge"],
+      "enabled": true
+    },
+    "context7": {
+      "type": "local",
+      "$desc": "Up-to-date library/framework documentation lookup, resolved to exact versions.",
+      "command": ["node", "node_modules/@upstash/context7-mcp/dist/index.js"],
+      "enabled": true,
+      "env": { "CONTEXT7_API_KEY": "{env:CONTEXT7_API_KEY}" }
+    },
+    "sequential-thinking": {
+      "type": "local",
+      "$desc": "Step-by-step reasoning MCP server for complex, multi-step problem decomposition.",
+      "command": ["node", "node_modules/@modelcontextprotocol/server-sequential-thinking/dist/index.js"],
+      "enabled": true
+    },
+    "fetch": {
+      "type": "local",
+      "$desc": "Fetch a URL and return cleaned content (markdown/text) for reading or summarizing.",
+      "command": ["node", "node_modules/mcp-server-fetch-typescript/build/index.js"],
+      "enabled": true
+    },
+    "tavily": {
+      "type": "remote",
+      "$desc": "Web search API. Requires TAVILY_API_KEY.",
+      "url": "https://mcp.tavily.com/mcp",
+      "enabled": true,
+      "headers": { "Authorization": "Bearer {env:TAVILY_API_KEY}" }
+    },
+    "github": {
+      "type": "remote",
+      "$desc": "GitHub repos, issues, PRs. Requires GITHUB_PERSONAL_ACCESS_TOKEN.",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "enabled": true,
+      "headers": { "Authorization": "Bearer {env:GITHUB_PERSONAL_ACCESS_TOKEN}" }
+    }
+  },
+  "required_env": {
+    "CONTEXT7_API_KEY": "Optional — context7 works without it but rate-limited.",
+    "TAVILY_API_KEY": "Required for the tavily remote search server.",
+    "GITHUB_PERSONAL_ACCESS_TOKEN": "Required for the github remote server.",
+    "E2B_API_KEY": "Only if you re-enable the e2b code-execution server."
+  }
+}

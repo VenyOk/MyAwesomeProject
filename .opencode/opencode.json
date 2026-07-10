@@ -11,7 +11,7 @@
     },
     "context7": {
       "type": "local",
-      "command": ["npx.cmd", "-y", "@upstash/context7-mcp"],
+      "command": ["node", ".opencode/mcp-servers/node_modules/@upstash/context7-mcp/dist/index.js"],
       "enabled": true,
       "env": {
         "CONTEXT7_API_KEY": "{env:CONTEXT7_API_KEY}"
@@ -19,17 +19,17 @@
     },
     "playwright": {
       "type": "local",
-      "command": ["npx.cmd", "-y", "@playwright/mcp@latest", "--browser", "msedge"],
+      "command": ["node", ".opencode/mcp-servers/node_modules/@playwright/mcp/cli.js", "--browser", "msedge"],
       "enabled": true
     },
     "sequential-thinking": {
       "type": "local",
-      "command": ["npx.cmd", "-y", "@modelcontextprotocol/server-sequential-thinking"],
+      "command": ["node", ".opencode/mcp-servers/node_modules/@modelcontextprotocol/server-sequential-thinking/dist/index.js"],
       "enabled": true
     },
     "fetch": {
       "type": "local",
-      "command": ["npx.cmd", "-y", "mcp-server-fetch-typescript"],
+      "command": ["node", ".opencode/mcp-servers/node_modules/mcp-server-fetch-typescript/build/index.js"],
       "enabled": true
     },
     "github": {
