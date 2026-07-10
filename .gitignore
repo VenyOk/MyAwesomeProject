@@ -60,3 +60,13 @@ data/*.db-wal
 data/*.db-shm
 data/*.index
 data/*.npy
+
+# Dev server / UI check artifacts
+dev_server.err
+shots/
+.playwright-mcp/
+second-brain-*.png
+frontend/ui_check.mjs
+
+# ZCode agent state
+.zcode/
