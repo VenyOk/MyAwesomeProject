@@ -146,3 +146,117 @@ def test_clear_command_clears_chat(client):
     res = client.post("/api/command", json={"input": "/clear", "chat_id": cid})
     assert res.status_code == 200
     assert client.app.state.services.chat_store.list_messages(cid) == []
+
+
+# ---------------------------- folders ----------------------------
+
+
+def test_folder_crud(client):
+    res = client.post("/api/folders", json={"name": "Проект", "description": "контекст"})
+    assert res.status_code == 200
+    fid = res.json()["id"]
+    assert res.json()["description"] == "контекст"
+    assert any(f["id"] == fid for f in client.get("/api/folders").json()["folders"])
+    # rename folder
+    res = client.patch(f"/api/folders/{fid}", json={"name": "Проект2", "description": "d2"})
+    assert res.json()["name"] == "Проект2" and res.json()["description"] == "d2"
+    # delete folder
+    assert client.delete(f"/api/folders/{fid}").status_code == 200
+    assert client.get("/api/folders").json()["folders"] == []
+
+
+def test_move_chat_to_folder(client):
+    fid = client.post("/api/folders", json={"name": "F"}).json()["id"]
+    cid = _make_chat(client)
+    res = client.patch(f"/api/chats/{cid}/move", json={"folder_id": fid})
+    assert res.json()["folder_id"] == fid
+    # deleting the folder unsets folder_id on its chats (SET NULL)
+    client.delete(f"/api/folders/{fid}")
+    chat = client.get(f"/api/chats/{cid}").json()
+    assert chat["folder_id"] is None
+
+
+def test_pin_chat(client):
+    cid = _make_chat(client)
+    res = client.patch(f"/api/chats/{cid}", json={"pinned": True})
+    assert res.json()["pinned"] is True
+    # pinned chat sorts first
+    other = _make_chat(client)
+    client.patch(f"/api/chats/{other}", json={"pinned": False})
+    chats = client.get("/api/chats").json()["chats"]
+    assert chats[0]["id"] == cid and chats[0]["pinned"] is True
+
+
+def test_folder_description_in_context(client):
+    """Folder description is surfaced in the system prompt on the next chat turn."""
+    fid = client.post(
+        "/api/folders", json={"name": "Код", "description": "Отвечай только на Python"}
+    ).json()["id"]
+    cid = _make_chat(client)
+    client.patch(f"/api/chats/{cid}/move", json={"folder_id": fid})
+    captured = {}
+
+    original = client.app.state.services.llm.generate
+
+    def spy(messages, max_new_tokens=None):
+        captured["system"] = next(m["content"] for m in messages if m["role"] == "system")
+        yield from original(messages, max_new_tokens)
+
+    client.app.state.services.llm.generate = spy
+    try:
+        client.post("/api/chat", json={"chat_id": cid, "message": "напиши пример"})
+    finally:
+        client.app.state.services.llm.generate = original
+    assert "Отвечай только на Python" in captured["system"]
+    assert "Контекст папки" in captured["system"]
+
+
+# ---------------------------- messages: edit/delete/search ----------------------------
+
+
+def _send(client, cid, message):
+    client.post("/api/chat", json={"chat_id": cid, "message": message})
+
+
+def test_delete_message(client):
+    cid = _make_chat(client)
+    _send(client, cid, "hello there")
+    msgs = client.get(f"/api/chats/{cid}/messages").json()["messages"]
+    user_id = msgs[0]["id"]
+    res = client.delete(f"/api/chats/{cid}/messages/{user_id}")
+    assert res.status_code == 200
+    remaining = client.get(f"/api/chats/{cid}/messages").json()["messages"]
+    assert all(m["id"] != user_id for m in remaining)
+
+
+def test_edit_message(client):
+    cid = _make_chat(client)
+    _send(client, cid, "original text")
+    msgs = client.get(f"/api/chats/{cid}/messages").json()["messages"]
+    user_id = msgs[0]["id"]
+    res = client.patch(f"/api/chats/{cid}/messages/{user_id}", json={"content": "edited text"})
+    assert res.status_code == 200
+    assert res.json()["content"] == "edited text"
+    assert res.json()["edited_at"]  # timestamp set
+
+
+def test_search_messages(client):
+    cid = _make_chat(client)
+    _send(client, cid, "uniquephrase banana")
+    res = client.get("/api/messages/search", params={"q": "uniquephrase"})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["count"] >= 1
+    assert any("uniquephrase" in m["content"] for m in data["messages"])
+
+
+def test_export_chat_markdown(client):
+    cid = _make_chat(client, "Мой диалог")
+    _send(client, cid, "привет")
+    res = client.get(f"/api/chats/{cid}/export")
+    assert res.status_code == 200
+    text = res.text
+    assert "# Мой диалог" in text
+    assert "привет" in text
+    assert "Пользователь" in text
+
