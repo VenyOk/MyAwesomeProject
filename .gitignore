@@ -44,6 +44,7 @@ env/
 
 # Test / type / lint caches
 .pytest_cache/
+.test-tmp*/
 .mypy_cache/
 .ruff_cache/
 .coverage
@@ -70,3 +71,7 @@ frontend/ui_check.mjs
 
 # ZCode agent state
 .zcode/
+.codex/
+
+# DB backups created by the migration runner
+data/*.backup-*

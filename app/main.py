@@ -12,7 +12,9 @@ from app.chat.commands import CommandContext
 from app.chat.session import ChatSession
 from app.chat.store import ChatStore
 from app.config import Settings, settings as default_settings
+from app.llm.base import LLMProvider
 from app.llm.gemma import GemmaLLM
+from app.llm.openai_compatible import OpenAICompatibleLLM
 from app.memory.recall import RecallService
 from app.memory.store import MemoryStore
 
@@ -27,7 +29,7 @@ class Services:
     store: MemoryStore
     recall: RecallService
     session: ChatSession
-    llm: GemmaLLM
+    llm: LLMProvider
     ctx: CommandContext
     chat_store: ChatStore
 
@@ -39,6 +41,13 @@ def build_services(settings: Settings | None = None) -> Services:
     store = MemoryStore(settings.db_path)
     chat_store = ChatStore(settings.db_path)
 
+    # Apply versioned migrations after the stores have created their baseline
+    # schema. Enriches the schema (workspace_id, soft delete, curated memory
+    # columns, tasks/reminders/...) on top of the existing CREATE IF NOT EXISTS.
+    from app.db.migrations import run_migrations
+
+    run_migrations(chat_store._conn, settings.db_path)
+
     from app.memory.embeddings import Embedder, FaissIndex
 
     embedder = Embedder(settings.embedding_model, settings.embedding_dim)
@@ -48,7 +57,12 @@ def build_services(settings: Settings | None = None) -> Services:
     recall = RecallService(store, embedder, index)
 
     session = ChatSession()
-    llm = GemmaLLM(settings)
+    if settings.llm_provider == "openai_compatible":
+        llm: LLMProvider = OpenAICompatibleLLM(settings)
+    elif settings.llm_provider == "legacy_gemma":
+        llm = GemmaLLM(settings)
+    else:
+        raise ValueError(f"Unknown LLM provider: {settings.llm_provider}")
     ctx = CommandContext(
         store=store,
         recall=recall,
