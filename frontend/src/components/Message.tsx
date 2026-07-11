@@ -6,13 +6,12 @@ import { fmtMoscow, type Msg } from "../api";
 
 type Props = {
   msg: Msg & { local?: boolean; streaming?: boolean };
-  canEdit?: boolean;
-  onDelete?: (id: number) => void;
-  onEdit?: (id: number, content: string) => void;
-  onEditAndRegenerate?: (id: number, content: string) => void;
+  canEdit?: boolean;          // true only for user's own messages
+  onDelete?: (id: number) => void;   // only user messages
+  onEditAndRegenerate?: (id: number, content: string) => void;  // only user messages
 };
 
-export default function Message({ msg, canEdit, onDelete, onEdit, onEditAndRegenerate }: Props) {
+export default function Message({ msg, canEdit, onDelete, onEditAndRegenerate }: Props) {
   const isUser = msg.role === "user";
   const isSystem = msg.role === "system";
   const role = "role-" + msg.role;
@@ -32,14 +31,15 @@ export default function Message({ msg, canEdit, onDelete, onEdit, onEditAndRegen
   const cancelEdit = () => { setEditing(false); setDraft(msg.content); };
   const saveEdit = () => {
     const v = draft.trim();
-    if (!v) { cancelEdit(); return; }
-    if (canEdit && onEditAndRegenerate) onEditAndRegenerate(msg.id, v);
-    else if (onEdit) onEdit(msg.id, v);
+    if (!v || !onEditAndRegenerate) { cancelEdit(); return; }
+    onEditAndRegenerate(msg.id, v);
     setEditing(false);
   };
 
   const waiting = msg.streaming && !msg.content;
-  const showActions = !isUser && !isSystem && !!msg.content && !msg.streaming;
+  const hasContent = !!msg.content;
+  // copy: any message; edit+delete: only user's own; nothing while streaming
+  const showActions = !editing && hasContent && !msg.streaming && !isSystem;
 
   return (
     <div className={"message " + (isUser ? "user" : isSystem ? "system" : "assistant")}>
@@ -61,7 +61,7 @@ export default function Message({ msg, canEdit, onDelete, onEdit, onEditAndRegen
               autoFocus
             />
             <div className="edit-actions">
-              <button onClick={saveEdit}>Сохранить{canEdit ? " и ответить заново" : ""}</button>
+              <button className="primary" onClick={saveEdit}>Сохранить и ответить заново</button>
               <button onClick={cancelEdit}>Отмена</button>
             </div>
           </div>
@@ -82,21 +82,25 @@ export default function Message({ msg, canEdit, onDelete, onEdit, onEditAndRegen
           </div>
         )}
 
-        {!editing && (
-          <div className="actions">
-            {showActions && (
-              <button className="action-btn" onClick={copy} title="Копировать">
-                {copied ? "✓ Скопировано" : "Копировать"}
-              </button>
-            )}
+        {/* hover action toolbar */}
+        {showActions && (
+          <div className="msg-actions">
+            <button
+              className="icon-action"
+              onClick={copy}
+              title={copied ? "Скопировано" : "Копировать"}
+            >
+              {copied ? "✓" : "⧉"}
+            </button>
             {canEdit && onEditAndRegenerate && (
-              <button className="action-btn" onClick={startEdit} title="Изменить и заново ответить">Изменить</button>
+              <button className="icon-action" onClick={startEdit} title="Изменить">✎</button>
             )}
-            {!canEdit && onEdit && msg.content && (
-              <button className="action-btn" onClick={startEdit} title="Изменить">Изменить</button>
-            )}
-            {onDelete && msg.content && (
-              <button className="action-btn danger" onClick={() => onDelete(msg.id)} title="Удалить">Удалить</button>
+            {canEdit && onDelete && (
+              <button
+                className="icon-action danger"
+                onClick={() => onDelete(msg.id)}
+                title="Удалить"
+              >🗑</button>
             )}
           </div>
         )}

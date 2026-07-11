@@ -26,6 +26,7 @@ export type Msg = {
 export type Health = {
   status: string;
   model: string;
+  llm_provider?: string;
   model_loaded: boolean;
   memories: number;
   index_size: number;

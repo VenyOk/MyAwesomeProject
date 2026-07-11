@@ -7,7 +7,7 @@ from typing import Callable
 from app.chat.session import ChatSession, DEFAULT_PERSONA
 from app.chat.store import ChatStore
 from app.config import Settings
-from app.llm.gemma import clean_response
+from app.llm.response import clean_response
 from app.memory.recall import RecallService
 from app.memory.store import Memory, MemoryStore
 

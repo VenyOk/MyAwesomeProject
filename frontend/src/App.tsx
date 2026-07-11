@@ -223,12 +223,6 @@ export default function App() {
     }
   }, [currentId, refreshHealth]);
 
-  const handleEditMessage = useCallback(async (msgId: number, content: string) => {
-    if (currentId == null || !content.trim()) return;
-    const updated = await editMessage(currentId, msgId, content);
-    setMessages((m) => m.map((x) => (x.id === msgId ? { ...updated } : x)));
-  }, [currentId]);
-
   // edit a user message then regenerate the assistant reply that followed it
   const handleEditAndRegenerate = useCallback(async (msgId: number, content: string) => {
     if (currentId == null || !content.trim()) return;
@@ -384,7 +378,6 @@ export default function App() {
               msg={m}
               canEdit={m.role === "user"}
               onDelete={handleDeleteMessage}
-              onEdit={handleEditMessage}
               onEditAndRegenerate={handleEditAndRegenerate}
             />
           ))}

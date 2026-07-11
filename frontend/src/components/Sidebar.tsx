@@ -39,7 +39,15 @@ export default function Sidebar(props: Props) {
   const [editFolderName, setEditFolderName] = useState("");
   const [editFolderDesc, setEditFolderDesc] = useState("");
   const [menuFor, setMenuFor] = useState<number | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const toggleFolder = (id: number) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
 
   useEffect(() => { if (editingId != null) inputRef.current?.select(); }, [editingId]);
 
@@ -186,22 +194,36 @@ export default function Sidebar(props: Props) {
             {folders.map((f) => {
               const items = filtered.filter((c) => !c.pinned && c.folder_id === f.id);
               if (items.length === 0 && titleFilter) return null;
+              const isCollapsed = collapsed.has(f.id);
               return (
                 <div key={f.id} className="folder-group">
                   <div className="folder-head">
                     <span
                       className="folder-name"
-                      onDoubleClick={() => {
-                        setEditingFolder(f.id);
-                        setEditFolderName(f.name);
-                        setEditFolderDesc(f.description);
-                      }}
-                    >📂 {f.name}</span>
-                    <button
-                      className="folder-add"
-                      title="Чат в эту папку"
-                      onClick={() => onNew(f.id)}
-                    >+</button>
+                      onClick={() => toggleFolder(f.id)}
+                      title={isCollapsed ? "Развернуть" : "Свернуть"}
+                    >
+                      <span className={"folder-caret" + (isCollapsed ? " closed" : "")}>▾</span>
+                      <span className="folder-icon">📂</span>
+                      <span className="folder-label">{f.name}</span>
+                    </span>
+                    <div className="folder-actions">
+                      <button
+                        className="folder-add"
+                        title="Создать чат в папке"
+                        onClick={(e) => { e.stopPropagation(); onNew(f.id); }}
+                      >+</button>
+                      <button
+                        className="folder-edit-btn"
+                        title="Изменить папку"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingFolder(f.id);
+                          setEditFolderName(f.name);
+                          setEditFolderDesc(f.description);
+                        }}
+                      >⋯</button>
+                    </div>
                   </div>
                   {editingFolder === f.id ? (
                     <div className="folder-edit">
@@ -214,9 +236,9 @@ export default function Sidebar(props: Props) {
                       </div>
                     </div>
                   ) : (
-                    f.description && <div className="folder-desc">{f.description}</div>
+                    !isCollapsed && f.description && <div className="folder-desc">{f.description}</div>
                   )}
-                  {items.map(renderChat)}
+                  {!isCollapsed && editingFolder !== f.id && items.map(renderChat)}
                 </div>
               );
             })}
@@ -253,8 +275,8 @@ export default function Sidebar(props: Props) {
       <div className="status">
         {health ? (
           <>
-            <div>Модель: <b>{health.model.replace("google/", "")}</b></div>
-            <div>Загружена: {health.model_loaded ? "да" : "нет"}</div>
+            <div>Модель: <b>{health.model.split("/").pop()}</b></div>
+            <div>Inference: {health.model_loaded ? "доступен" : "недоступен"}</div>
             <div>Воспоминаний: {health.memories} · Индекс: {health.index_size}</div>
           </>
         ) : (

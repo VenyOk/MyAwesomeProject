@@ -8,7 +8,7 @@ from app.config import settings
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Second Brain — local Gemma 4 app")
+    parser = argparse.ArgumentParser(description="Second Brain — local Qwen web app")
     parser.add_argument("--host", default=settings.host)
     parser.add_argument("--port", type=int, default=settings.port)
     parser.add_argument("--no-browser", action="store_true", help="Do not open a browser")
