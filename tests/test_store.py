@@ -44,8 +44,19 @@ def test_search_text(store: MemoryStore):
 def test_delete(store: MemoryStore):
     mem = store.add(content="temp note")
     assert store.delete(mem.id) is True
-    assert store.get(mem.id) is None
-    assert store.delete(mem.id) is False
+    # soft delete: row stays for restore/audit but is excluded from listings
+    soft = store.get(mem.id)
+    assert soft is not None
+    assert soft.status == "deleted"
+    assert soft.deleted_at is not None
+    assert store.count() == 0
+    assert store.delete(mem.id) is False  # already deleted
+    # restore brings it back
+    restored = store.restore(mem.id)
+    assert restored is not None
+    assert restored.status == "active"
+    assert restored.deleted_at is None
+    assert store.count() == 1
 
 
 def test_count(store: MemoryStore):

@@ -176,6 +176,67 @@ export function getHealth(): Promise<Health> {
   return jget<Health>(`${BASE}/health`);
 }
 
+// ---------------------------- memories ----------------------------
+
+export type MemoryStatus = "candidate" | "active" | "superseded" | "deleted";
+export type MemoryKind = "fact" | "preference" | "decision" | "idea" | "person" | "project";
+
+export type Memory = {
+  id: number;
+  content: string;
+  summary: string | null;
+  tags: string[];
+  source: string;
+  created_at: string;
+  updated_at: string;
+  kind: string;
+  importance: number;
+  confidence: number;
+  sensitivity: string;
+  source_type: string;
+  source_message_id: number | null;
+  status: string;
+  deleted_at: string | null;
+};
+
+export async function listMemories(params?: {
+  q?: string; status?: string; kind?: string; limit?: number;
+}): Promise<{ memories: Memory[]; count: number }> {
+  const qs = new URLSearchParams();
+  if (params?.q) qs.set("q", params.q);
+  if (params?.status) qs.set("status", params.status);
+  if (params?.kind) qs.set("kind", params.kind);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  const tail = qs.toString();
+  return jget<{ memories: Memory[]; count: number }>(`${BASE}/memories${tail ? "?" + tail : ""}`);
+}
+
+export async function updateMemory(id: number, patch: { content?: string; kind?: string; summary?: string }): Promise<Memory> {
+  const r = await fetch(`${BASE}/memories/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+export async function activateMemory(id: number): Promise<Memory> {
+  const r = await fetch(`${BASE}/memories/${id}/activate`, { method: "POST" });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+export async function deleteMemory(id: number): Promise<void> {
+  await fetch(`${BASE}/memories/${id}`, { method: "DELETE" });
+}
+
+export async function restoreMemory(id: number): Promise<Memory> {
+  const r = await fetch(`${BASE}/memories/${id}/restore`, { method: "POST" });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
 export type ChatDone = {
   user_message: Msg;
   assistant_message: Msg;

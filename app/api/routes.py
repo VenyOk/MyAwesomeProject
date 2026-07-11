@@ -163,12 +163,11 @@ def chat(payload: ChatRequest, request: Request):
     if context:
         system = system + "\n\n" + context
 
-    # persist user turn + auto-save a global memory
+    # persist user turn. Memory extraction happens AFTER the answer is generated
+    # (plan §9): a casual reply must not be force-saved, and the current message
+    # must not feed RAG in the same request.
     user_msg = services.chat_store.add_message(chat.id, "user", message)
     services.chat_store.maybe_title_from_first_message(chat.id, message)
-    if services.settings.auto_save:
-        mem = services.store.add(content=message, source="chat")
-        services.recall.add_memory(mem)
 
     history = [{"role": m.role, "content": m.content} for m in services.chat_store.list_messages(chat.id)]
     messages = [{"role": "system", "content": system}] + history
@@ -196,6 +195,30 @@ def chat(payload: ChatRequest, request: Request):
             saved = True
             title = services.chat_store.get(chat.id).title
             yield f"data: {json.dumps({'done': True, 'user_message': user_msg.to_dict(), 'assistant_message': assistant_msg.to_dict(), 'title': title}, ensure_ascii=False)}\n\n"
+            # Memory extraction (plan §10). Runs only when auto-save is enabled.
+            # Casual messages yield no candidates; explicit "запомни ..." becomes
+            # active, inferred facts become candidate pending confirmation.
+            if services.settings.auto_save:
+                from app.memory.extractor import (
+                    candidate_to_memory_kwargs,
+                    extract_candidates,
+                )
+
+                created: list[dict] = []
+                for cand in extract_candidates(
+                    message, services.llm, max_new_tokens=512
+                ):
+                    kwargs = candidate_to_memory_kwargs(cand)
+                    mem = services.store.add(
+                        source="chat",
+                        source_type="chat",
+                        source_message_id=user_msg.id,
+                        **kwargs,
+                    )
+                    services.recall.add_memory(mem)
+                    created.append({"id": mem.id, "status": mem.status, "kind": mem.kind, "content": mem.content})
+                if created:
+                    yield f"data: {json.dumps({'memory_created': created}, ensure_ascii=False)}\n\n"
         finally:
             # client disconnected (e.g. pressed Stop) — persist the partial answer
             if not saved and accumulated:
@@ -326,12 +349,22 @@ def export_chat(chat_id: int, request: Request, format: str = "md"):
 
 
 @router.get("/memories")
-def list_memories(request: Request, q: str | None = None, limit: int = 50):
+def list_memories(
+    request: Request,
+    q: str | None = None,
+    status: str | None = None,
+    kind: str | None = None,
+    limit: int = 100,
+):
     services = _services(request)
-    if q:
+    if status:
+        memories = services.store.list_by_status(status, limit=limit)
+    elif q:
         memories = services.store.search_text(q, limit=limit)
     else:
         memories = services.store.list_recent(limit)
+    if kind:
+        memories = [m for m in memories if m.kind == kind]
     return {"memories": [m.to_dict() for m in memories], "count": len(memories)}
 
 
@@ -339,8 +372,54 @@ def list_memories(request: Request, q: str | None = None, limit: int = 50):
 def get_memory(memory_id: int, request: Request):
     services = _services(request)
     memory = services.store.get(memory_id)
+    if memory is None or memory.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return memory.to_dict()
+
+
+class UpdateMemoryRequest(BaseModel):
+    content: str | None = None
+    kind: str | None = None
+    summary: str | None = None
+
+
+@router.patch("/memories/{memory_id}")
+def update_memory(memory_id: int, payload: UpdateMemoryRequest, request: Request):
+    services = _services(request)
+    existing = services.store.get(memory_id)
+    if existing is None or existing.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    updated = services.store.update(
+        memory_id,
+        content=payload.content,
+        kind=payload.kind,
+        summary=payload.summary,
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    # content changed -> keep the FAISS index in sync
+    if payload.content:
+        services.recall.rebuild_from_store()
+    return updated.to_dict()
+
+
+@router.post("/memories/{memory_id}/activate")
+def activate_memory(memory_id: int, request: Request):
+    services = _services(request)
+    memory = services.store.activate(memory_id)
     if memory is None:
         raise HTTPException(status_code=404, detail="Memory not found")
+    services.recall.add_memory(memory)
+    return memory.to_dict()
+
+
+@router.post("/memories/{memory_id}/restore")
+def restore_memory(memory_id: int, request: Request):
+    services = _services(request)
+    memory = services.store.restore(memory_id)
+    if memory is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    services.recall.rebuild_from_store()
     return memory.to_dict()
 
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import Composer from "./components/Composer";
 import Message from "./components/Message";
+import MemoryView from "./components/MemoryView";
 import {
   type Chat,
   type Folder,
@@ -53,6 +54,7 @@ export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">(loadTheme);
+  const [view, setView] = useState<"chat" | "memory">("chat");
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -351,9 +353,15 @@ export default function App() {
         onRenameFolder={renameFolderCb}
         onDeleteFolder={removeFolder}
         onThemeChange={setTheme}
+        onOpenMemory={() => { setView("memory"); setSidebarOpen(false); }}
         onClose={() => setSidebarOpen(false)}
       />
       {sidebarOpen && <div className="overlay" onClick={() => setSidebarOpen(false)} />}
+      {view === "memory" ? (
+        <main className="chat">
+          <MemoryView onClose={() => setView("chat")} />
+        </main>
+      ) : (
       <main className="chat">
         <header className="chat-topbar">
           <button
@@ -391,6 +399,7 @@ export default function App() {
           streaming={streaming}
         />
       </main>
+      )}
     </div>
   );
 }

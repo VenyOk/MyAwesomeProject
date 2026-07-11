@@ -18,6 +18,7 @@ type Props = {
   onRenameFolder: (id: number, name: string, description?: string) => Promise<void>;
   onDeleteFolder: (id: number) => Promise<void>;
   onThemeChange: (t: "dark" | "light") => void;
+  onOpenMemory: () => void;
   onClose: () => void;
 };
 
@@ -25,7 +26,7 @@ export default function Sidebar(props: Props) {
   const {
     chats, folders, currentId, health, theme,
     onSelect, onNew, onDelete, onRename, onTogglePin, onMove,
-    onCreateFolder, onRenameFolder, onDeleteFolder, onThemeChange, onClose,
+    onCreateFolder, onRenameFolder, onDeleteFolder, onThemeChange, onOpenMemory, onClose,
   } = props;
 
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -165,7 +166,10 @@ export default function Sidebar(props: Props) {
         />
       </div>
 
-      <button className="new-chat" onClick={() => onNew()}>+ Новый чат</button>
+      <div className="sidebar-actions">
+        <button className="new-chat" onClick={() => onNew()}>+ Новый чат</button>
+        <button className="open-memory" onClick={onOpenMemory} title="Просмотреть и управлять памятью">🧠 Память</button>
+      </div>
 
       <div className="chat-list">
         {/* search results override the list */}

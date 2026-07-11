@@ -100,12 +100,15 @@ def test_chat_streams_tokens(client):
     assert '"done": true' in body
 
 
-def test_chat_autosaves_memory(client):
+def test_chat_does_not_autosave_casual_message(client):
+    # Plan §10 / acceptance #3: a casual message must NOT become a memory.
+    # With the FakeLLM (returns plain text, not extractor JSON), extraction
+    # yields nothing, so the store stays empty.
     cid = _make_chat(client)
-    client.post("/api/chat", json={"chat_id": cid, "message": "remember the number 42"})
-    data = client.get("/api/memories").json()
-    assert data["count"] == 1
-    assert "42" in data["memories"][0]["content"]
+    before = client.get("/api/memories").json()["count"]
+    client.post("/api/chat", json={"chat_id": cid, "message": "привет"})
+    after = client.get("/api/memories").json()["count"]
+    assert after == before
 
 
 def test_chat_persists_messages(client):
@@ -199,7 +202,12 @@ def test_folder_description_in_context(client):
     original = client.app.state.services.llm.generate
 
     def spy(messages, max_new_tokens=None):
-        captured["system"] = next(m["content"] for m in messages if m["role"] == "system")
+        # Capture only the chat system prompt; ignore the extractor call which
+        # follows in the same request and has a different system message.
+        captured.setdefault(
+            "system",
+            next(m["content"] for m in messages if m["role"] == "system"),
+        )
         yield from original(messages, max_new_tokens)
 
     client.app.state.services.llm.generate = spy
