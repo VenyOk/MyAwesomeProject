@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -9,7 +10,21 @@ DATA_DIR = PROJECT_ROOT / "data"
 
 @dataclass
 class Settings:
-    model_id: str = "google/gemma-4-12B-it"
+    model_id: str = field(
+        default_factory=lambda: os.getenv("LLM_MODEL", "Qwen/Qwen3.5-4B")
+    )
+    llm_provider: str = field(
+        default_factory=lambda: os.getenv("LLM_PROVIDER", "openai_compatible")
+    )
+    llm_base_url: str = field(
+        default_factory=lambda: os.getenv("LLM_BASE_URL", "http://127.0.0.1:8081/v1")
+    )
+    llm_api_key: str = field(
+        default_factory=lambda: os.getenv("LLM_API_KEY", "local")
+    )
+    llm_request_timeout: float = field(
+        default_factory=lambda: float(os.getenv("LLM_REQUEST_TIMEOUT", "120"))
+    )
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_dim: int = 384
 

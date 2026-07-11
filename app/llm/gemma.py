@@ -1,28 +1,10 @@
 from __future__ import annotations
 
-import re
 from threading import Thread
 from typing import Iterator
 
 from app.config import Settings
-
-_THOUGHT_BLOCK = re.compile(r"<\|channel\|>thought.*?<\|channel\|>", re.DOTALL)
-_CONTROL_TOKENS = [
-    "<|think|>",
-    "<|channel|>thought",
-    "<|channel|>",
-    "<|end|>",
-    "<|start|>",
-    "<end_of_turn>",
-    "<start_of_turn>",
-]
-
-
-def clean_response(text: str) -> str:
-    text = _THOUGHT_BLOCK.sub("", text)
-    for token in _CONTROL_TOKENS:
-        text = text.replace(token, "")
-    return text.strip()
+from app.llm.response import clean_response
 
 
 class GemmaLLM:

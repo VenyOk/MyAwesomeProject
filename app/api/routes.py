@@ -7,7 +7,7 @@ from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 
 from app.chat.commands import REGISTRY
-from app.llm.gemma import clean_response
+from app.llm.response import clean_response
 
 router = APIRouter()
 
@@ -61,6 +61,7 @@ def health(request: Request):
     return {
         "status": "ok",
         "model": services.settings.model_id,
+        "llm_provider": services.settings.llm_provider,
         "model_loaded": services.llm.is_loaded(),
         "memories": services.store.count(),
         "index_size": services.recall.index.size,
@@ -173,14 +174,23 @@ def chat(payload: ChatRequest, request: Request):
     messages = [{"role": "system", "content": system}] + history
 
     def event_stream():
+        from app.llm.response import StreamCleaner
+
         accumulated: list[str] = []
         saved = False
         try:
+            cleaner = StreamCleaner()
             for chunk in services.llm.generate(
                 messages, max_new_tokens=services.settings.max_new_tokens
             ):
                 accumulated.append(chunk)
-                yield f"data: {json.dumps({'token': chunk}, ensure_ascii=False)}\n\n"
+                safe = cleaner.feed(chunk)
+                if safe:
+                    yield f"data: {json.dumps({'token': safe}, ensure_ascii=False)}\n\n"
+            tail = cleaner.flush()
+            if tail:
+                accumulated.append(tail)
+                yield f"data: {json.dumps({'token': tail}, ensure_ascii=False)}\n\n"
             full = clean_response("".join(accumulated))
             assistant_msg = services.chat_store.add_message(chat.id, "assistant", full)
             saved = True
