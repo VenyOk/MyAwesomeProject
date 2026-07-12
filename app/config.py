@@ -4,6 +4,15 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Load a local .env if present so the app picks up ollama/model settings
+# without requiring shell env vars. No-op in production/CI without a .env.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+except ImportError:
+    pass
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 

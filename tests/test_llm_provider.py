@@ -5,6 +5,7 @@ import json
 import httpx
 
 from app.config import Settings
+from app.llm.base import LLMChunk
 from app.llm.openai_compatible import OpenAICompatibleLLM
 from app.llm.response import StreamCleaner, clean_response
 
@@ -121,3 +122,65 @@ def test_chat_endpoint_strips_artifacts_from_stream(client):
     msgs = client.get(f"/api/chats/{chat['id']}/messages").json()["messages"]
     assert msgs[-1]["content"].strip() == "Привет"
     _ = cmd_mod, router  # silence unused imports
+
+
+def test_generate_with_tools_accumulates_split_tool_call():
+    """Ollama streams tool_calls as partial JSON fragments across chunks;
+    arguments must be concatenated per index before parsing."""
+    chunks = [
+        # first fragment: id + name + empty arguments
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"memory.search","arguments":""}}]}}]}\n\n',
+        # argument fragment 1
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"qu"}}]}}]}\n\n',
+        # argument fragment 2
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ery\\":\\"питон\\"}"}}]}}]}\n\n',
+        # finish
+        'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n',
+        "data: [DONE]\n\n",
+    ]
+    body = "".join(chunks)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "qwen3.5:9b"}]})
+        return httpx.Response(200, text=body)
+
+    settings = Settings(model_id="qwen3.5:9b", llm_base_url="http://x/v1")
+    provider = OpenAICompatibleLLM(settings, transport=httpx.MockTransport(handler))
+
+    out = list(provider.generate_with_tools(
+        [{"role": "user", "content": "find"}],
+        [{"type": "function", "function": {"name": "memory.search"}}],
+    ))
+    # expect exactly one tool_call chunk with parsed arguments
+    tc_chunks = [c for c in out if c.kind == "tool_call"]
+    assert len(tc_chunks) == 1
+    assert len(tc_chunks[0].tool_calls) == 1
+    part = tc_chunks[0].tool_calls[0]
+    assert part.name == "memory.search"
+    assert part.arguments == {"query": "питон"}
+    assert part.id == "call_1"
+
+
+def test_generate_with_tools_yields_text_and_tool_call():
+    """A turn may contain both prose (content) and a tool call."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "qwen3.5:9b"}]})
+        body = (
+            'data: {"choices":[{"delta":{"content":"Ищу..."}}]}\n\n'
+            'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"task.create","arguments":"{\\"title\\":\\"молоко\\"}"}}]}}]}\n\n'
+            'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n'
+            "data: [DONE]\n\n"
+        )
+        return httpx.Response(200, text=body)
+
+    settings = Settings(model_id="qwen3.5:9b", llm_base_url="http://x/v1")
+    provider = OpenAICompatibleLLM(settings, transport=httpx.MockTransport(handler))
+    out = list(provider.generate_with_tools([{"role": "user", "content": "x"}], []))
+    text_chunks = [c for c in out if c.kind == "text"]
+    tc_chunks = [c for c in out if c.kind == "tool_call"]
+    assert text_chunks and text_chunks[0].content == "Ищу..."
+    assert len(tc_chunks) == 1
+    assert tc_chunks[0].tool_calls[0].arguments == {"title": "молоко"}
