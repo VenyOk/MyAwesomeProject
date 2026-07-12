@@ -167,7 +167,9 @@ def chat(payload: ChatRequest, request: Request):
 
     # global memory recall (RAG) — memories are shared across all chats
     context = services.recall.build_context(message, k=services.settings.recall_top_k)
-    system = services.ctx.persona
+    from app.chat.session import _today_msk
+
+    system = f"{services.ctx.persona}\n\nТекущая дата (МСК): {_today_msk()}."
     # shared folder context: if the chat belongs to a folder with a description,
     # surface it so all chats in the folder share that context.
     if chat.folder_id:

@@ -53,6 +53,19 @@ export default function Sidebar(props: Props) {
 
   useEffect(() => { if (editingId != null) inputRef.current?.select(); }, [editingId]);
 
+  // Close the chat action menu when clicking outside of it.
+  useEffect(() => {
+    if (menuFor == null) return;
+    const close = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest(".chat-menu") && !target.closest(".chat-more")) {
+        setMenuFor(null);
+      }
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [menuFor]);
+
   // debounce search across messages
   useEffect(() => {
     const q = search.trim();
@@ -102,7 +115,12 @@ export default function Sidebar(props: Props) {
     <div
       key={c.id}
       className={"chat-item" + (c.id === currentId ? " active" : "")}
-      onClick={() => editingId !== c.id && onSelect(c.id)}
+      onClick={() => {
+        if (editingId !== c.id) {
+          if (menuFor != null && menuFor !== c.id) setMenuFor(null);
+          onSelect(c.id);
+        }
+      }}
       onDoubleClick={() => startEdit(c)}
     >
       {editingId === c.id ? (

@@ -48,6 +48,10 @@ EXTRACTOR_SYSTEM_PROMPT = (
     "«имей в виду») — ставь explicit=true и confidence выше 0.85.\n"
     "- Если факт предположительный (ты догадался сам) — explicit=false и lower confidence.\n"
     "- Чувствительные данные (здоровье, финансы, пароли, личное) — sensitivity=«private».\n"
+    "- НЕ ВЫДУМЫВАЙ даты, числа, имена и детали, которых нет в сообщении. "
+    "Если пользователь сказал «вчера», а в памяти нужно сохранить конкретную дату — "
+    "разрешай её по текущей дате (указана ниже). Если дата не важна — не указывай её.\n"
+    "- Цитируй имена и названия ровно так, как их написал пользователь.\n"
     "- Формулируй content как утверждение о пользователе, от третьего лица, "
     "коротко и точно.\n"
     "- Если запоминать нечего — верни пустой список candidates.\n\n"
@@ -112,8 +116,11 @@ def extract_candidates(
     """
     if not user_message.strip():
         return []
+    from app.chat.session import _today_msk
+
+    system_prompt = f"{EXTRACTOR_SYSTEM_PROMPT}\n\nТекущая дата (МСК): {_today_msk()}."
     messages = [
-        {"role": "system", "content": EXTRACTOR_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message},
     ]
     try:
