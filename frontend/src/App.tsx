@@ -379,8 +379,8 @@ export default function App() {
         currentId={currentId}
         health={health}
         theme={theme}
-        onSelect={(id) => { selectChat(id); setSidebarOpen(false); }}
-        onNew={(folderId) => { newChat(folderId); setSidebarOpen(false); }}
+        onSelect={(id) => { selectChat(id); setView("chat"); setSidebarOpen(false); }}
+        onNew={(folderId) => { newChat(folderId); setView("chat"); setSidebarOpen(false); }}
         onDelete={removeChat}
         onRename={rename}
         onTogglePin={togglePin}
