@@ -95,7 +95,7 @@ def test_chat_endpoint_strips_artifacts_from_stream(client):
         def is_loaded(self) -> bool:
             return True
 
-        def generate(self, messages, max_new_tokens=None):
+        def generate(self, messages, max_new_tokens=None, tools=None):
             yield "Привет"
             yield "<|im_end|>"
             yield "<|endoftext|>"

@@ -41,6 +41,7 @@ __pycache__/
 .venv/
 venv/
 env/
+.local/
 
 # Test / type / lint caches
 .pytest_cache/

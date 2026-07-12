@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router as api_router
+from app.agent.store import AgentStore
 from app.chat.commands import CommandContext
 from app.chat.session import ChatSession
 from app.chat.store import ChatStore
@@ -17,6 +18,7 @@ from app.llm.gemma import GemmaLLM
 from app.llm.openai_compatible import OpenAICompatibleLLM
 from app.memory.recall import RecallService
 from app.memory.store import MemoryStore
+from app.tasks.store import TaskStore
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = PROJECT_ROOT / "web"
@@ -32,6 +34,9 @@ class Services:
     llm: LLMProvider
     ctx: CommandContext
     chat_store: ChatStore
+    task_store: TaskStore
+    tool_registry: object  # ToolRegistry; typed loosely to avoid import cycles
+    agent_store: AgentStore | None = None
 
 
 def build_services(settings: Settings | None = None) -> Services:
@@ -40,6 +45,7 @@ def build_services(settings: Settings | None = None) -> Services:
 
     store = MemoryStore(settings.db_path)
     chat_store = ChatStore(settings.db_path)
+    task_store = TaskStore(settings.db_path)
 
     # Apply versioned migrations after the stores have created their baseline
     # schema. Enriches the schema (workspace_id, soft delete, curated memory
@@ -47,7 +53,9 @@ def build_services(settings: Settings | None = None) -> Services:
     from app.db.migrations import run_migrations
 
     run_migrations(chat_store._conn, settings.db_path)
+    agent_store = AgentStore(settings.db_path)
 
+    from app.agent.tool_registry import build_default_registry
     from app.memory.embeddings import Embedder, FaissIndex
 
     embedder = Embedder(settings.embedding_model, settings.embedding_dim)
@@ -71,6 +79,7 @@ def build_services(settings: Settings | None = None) -> Services:
         settings=settings,
         chat_store=chat_store,
     )
+    tool_registry = build_default_registry()
     return Services(
         settings=settings,
         store=store,
@@ -79,6 +88,9 @@ def build_services(settings: Settings | None = None) -> Services:
         llm=llm,
         ctx=ctx,
         chat_store=chat_store,
+        task_store=task_store,
+        tool_registry=tool_registry,
+        agent_store=agent_store,
     )
 
 
@@ -98,6 +110,9 @@ def create_app(services: Services | None = None) -> FastAPI:
         if owns_services:
             services.store.close()
             services.chat_store.close()
+            services.task_store.close()
+            if services.agent_store is not None:
+                services.agent_store.close()
 
     app = FastAPI(title="Second Brain", lifespan=lifespan)
     app.include_router(api_router, prefix="/api")

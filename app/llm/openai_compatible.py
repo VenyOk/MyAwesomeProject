@@ -51,6 +51,7 @@ class OpenAICompatibleLLM:
         messages: list[dict],
         max_new_tokens: int | None = None,
         thinking: bool | None = None,
+        tools: list[dict] | None = None,
     ) -> Iterator[str]:
         think = self._thinking if thinking is None else thinking
         payload = {
@@ -63,6 +64,8 @@ class OpenAICompatibleLLM:
             "top_k": self.settings.top_k,
             "chat_template_kwargs": {"enable_thinking": bool(think)},
         }
+        if tools:
+            payload["tools"] = tools
         timeout = httpx.Timeout(
             connect=5.0,
             read=self.settings.llm_request_timeout,

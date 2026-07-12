@@ -23,4 +23,5 @@ class LLMProvider(Protocol):
         messages: list[dict],
         max_new_tokens: int | None = None,
         thinking: bool | None = None,
+        tools: list[dict] | None = None,
     ) -> Iterator[str]: ...

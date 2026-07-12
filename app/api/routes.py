@@ -51,6 +51,20 @@ class UpdateMessageRequest(BaseModel):
     content: str
 
 
+class CreateTaskRequest(BaseModel):
+    title: str
+    description: str = ""
+    due_at: str | None = None
+    priority: int = 0
+
+
+class UpdateTaskRequest(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    due_at: str | None = None
+    priority: int | None = None
+
+
 def _services(request: Request):
     return request.app.state.services
 
@@ -178,20 +192,53 @@ def chat(payload: ChatRequest, request: Request):
         accumulated: list[str] = []
         saved = False
         try:
-            cleaner = StreamCleaner()
-            for chunk in services.llm.generate(
-                messages, max_new_tokens=services.settings.max_new_tokens
-            ):
-                accumulated.append(chunk)
-                safe = cleaner.feed(chunk)
-                if safe:
-                    yield f"data: {json.dumps({'token': safe}, ensure_ascii=False)}\n\n"
-            tail = cleaner.flush()
-            if tail:
-                accumulated.append(tail)
-                yield f"data: {json.dumps({'token': tail}, ensure_ascii=False)}\n\n"
-            full = clean_response("".join(accumulated))
-            assistant_msg = services.chat_store.add_message(chat.id, "assistant", full)
+            # When tools are available, run the orchestrator loop: the model may
+            # call tools and produce a final answer from their results. Otherwise
+            # fall back to plain token streaming.
+            use_orchestrator = bool(getattr(services, "tool_registry", None))
+            if use_orchestrator:
+                from app.agent.orchestrator import run_turn
+
+                full_parts: list[str] = []
+                cleaner = StreamCleaner()
+                for event in run_turn(
+                    messages,
+                    services.llm,
+                    services.tool_registry,
+                    services,
+                    chat_id=chat.id,
+                    max_new_tokens=services.settings.max_new_tokens,
+                ):
+                    if event.kind == "text" and event.payload.get("content"):
+                        text = cleaner.feed(event.payload["content"])
+                        if text:
+                            full_parts.append(text)
+                            yield f"data: {json.dumps({'token': text}, ensure_ascii=False)}\n\n"
+                    elif event.kind in ("tool_started", "tool_finished", "tool_error", "confirmation_required"):
+                        yield f"data: {json.dumps(event.payload | {'type': event.kind}, ensure_ascii=False)}\n\n"
+                tail = cleaner.flush()
+                if tail:
+                    full_parts.append(tail)
+                    yield f"data: {json.dumps({'token': tail}, ensure_ascii=False)}\n\n"
+                full = clean_response("".join(full_parts))
+            else:
+                cleaner = StreamCleaner()
+                for chunk in services.llm.generate(
+                    messages, max_new_tokens=services.settings.max_new_tokens
+                ):
+                    accumulated.append(chunk)
+                    safe = cleaner.feed(chunk)
+                    if safe:
+                        yield f"data: {json.dumps({'token': safe}, ensure_ascii=False)}\n\n"
+                tail = cleaner.flush()
+                if tail:
+                    accumulated.append(tail)
+                    yield f"data: {json.dumps({'token': tail}, ensure_ascii=False)}\n\n"
+                full = clean_response("".join(accumulated))
+            if full.strip():
+                assistant_msg = services.chat_store.add_message(chat.id, "assistant", full)
+            else:
+                assistant_msg = services.chat_store.add_message(chat.id, "assistant", "(нет ответа)")
             saved = True
             title = services.chat_store.get(chat.id).title
             yield f"data: {json.dumps({'done': True, 'user_message': user_msg.to_dict(), 'assistant_message': assistant_msg.to_dict(), 'title': title}, ensure_ascii=False)}\n\n"
@@ -227,6 +274,112 @@ def chat(payload: ChatRequest, request: Request):
                 )
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+# ---------------------------- confirmations ----------------------------
+
+
+def _agent_store(request: Request):
+    store = _services(request).agent_store
+    if store is None:
+        raise HTTPException(status_code=503, detail="Confirmation storage is unavailable")
+    return store
+
+
+@router.get("/confirmations")
+def list_confirmations(request: Request, chat_id: int | None = None):
+    confirmations = _agent_store(request).list_confirmations(chat_id=chat_id)
+    return {"confirmations": [confirmation.to_dict() for confirmation in confirmations]}
+
+
+@router.post("/confirmations/{confirmation_id}/approve")
+def approve_confirmation(confirmation_id: int, request: Request):
+    services = _services(request)
+    store = _agent_store(request)
+    confirmation = store.resolve_confirmation(confirmation_id, approved=True)
+    if confirmation is None:
+        raise HTTPException(status_code=409, detail="Confirmation is no longer pending")
+    result = services.tool_registry.dispatch(
+        confirmation.tool_name, confirmation.arguments, services
+    )
+    store.finish_tool_run(
+        confirmation.tool_run_id,
+        "failed" if "error" in result else "succeeded",
+        result,
+    )
+    return {"confirmation": confirmation.to_dict(), "result": result}
+
+
+@router.post("/confirmations/{confirmation_id}/reject")
+def reject_confirmation(confirmation_id: int, request: Request):
+    store = _agent_store(request)
+    confirmation = store.resolve_confirmation(confirmation_id, approved=False)
+    if confirmation is None:
+        raise HTTPException(status_code=409, detail="Confirmation is no longer pending")
+    result = {"status": "rejected"}
+    store.finish_tool_run(confirmation.tool_run_id, "rejected", result)
+    return {"confirmation": confirmation.to_dict(), "result": result}
+
+
+# ---------------------------- tasks ----------------------------
+
+
+@router.get("/tasks")
+def list_tasks(request: Request, status: str | None = "open"):
+    services = _services(request)
+    return {"tasks": [task.to_dict() for task in services.task_store.list(status=status)]}
+
+
+@router.post("/tasks")
+def create_task(payload: CreateTaskRequest, request: Request):
+    task = _services(request).task_store.create(
+        payload.title,
+        payload.description,
+        due_at=payload.due_at,
+        priority=payload.priority,
+    )
+    return task.to_dict()
+
+
+@router.get("/tasks/{task_id}")
+def get_task(task_id: int, request: Request):
+    task = _services(request).task_store.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task.to_dict()
+
+
+@router.patch("/tasks/{task_id}")
+def update_task(task_id: int, payload: UpdateTaskRequest, request: Request):
+    fields = payload.model_fields_set
+    changes = {
+        name: getattr(payload, name)
+        for name in fields
+        if name == "due_at" or getattr(payload, name) is not None
+    }
+    task = _services(request).task_store.update(
+        task_id,
+        **changes,
+    )
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task.to_dict()
+
+
+@router.post("/tasks/{task_id}/complete")
+def complete_task(task_id: int, request: Request):
+    task = _services(request).task_store.complete(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Open task not found")
+    return task.to_dict()
+
+
+@router.post("/tasks/{task_id}/cancel")
+def cancel_task(task_id: int, request: Request):
+    task = _services(request).task_store.cancel(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Open task not found")
+    return task.to_dict()
 
 
 # ---------------------------- commands ----------------------------

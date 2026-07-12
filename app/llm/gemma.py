@@ -60,6 +60,7 @@ class GemmaLLM:
         messages: list[dict],
         max_new_tokens: int | None = None,
         thinking: bool | None = None,
+        tools: list[dict] | None = None,
     ) -> Iterator[str]:
         self.load()
         from transformers import TextIteratorStreamer

@@ -16,6 +16,7 @@ from pathlib import Path
 import uvicorn
 
 from app.chat.commands import CommandContext
+from app.agent.store import AgentStore
 from app.chat.session import ChatSession
 from app.chat.store import ChatStore
 from app.config import settings
@@ -34,6 +35,12 @@ def build_fake_services() -> Services:
     from app.db.migrations import run_migrations
 
     run_migrations(chat_store._conn, db_path)
+    from app.agent.tool_registry import build_default_registry
+    from app.tasks.store import TaskStore
+
+    task_store = TaskStore(db_path)
+    agent_store = AgentStore(db_path)
+    tool_registry = build_default_registry()
     embedder = FakeEmbedder(dim=16)
     index = BruteForceIndex(dim=16)
     recall = RecallService(store, embedder, index)
@@ -49,7 +56,8 @@ def build_fake_services() -> Services:
     )
     return Services(
         settings=settings, store=store, recall=recall, session=session, llm=llm,
-        ctx=ctx, chat_store=chat_store,
+        ctx=ctx, chat_store=chat_store, task_store=task_store, tool_registry=tool_registry,
+        agent_store=agent_store,
     )
 
 

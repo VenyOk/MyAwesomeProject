@@ -196,11 +196,37 @@ def m4_tasks_and_friends(conn: sqlite3.Connection) -> None:
     )
 
 
+# --------------------------------------------------------------------------- #
+# Migration 5: durable confirmations for tools that cannot run automatically.
+# --------------------------------------------------------------------------- #
+def m5_confirmations(conn: sqlite3.Connection) -> None:
+    _exec(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS confirmations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workspace_id INTEGER NOT NULL DEFAULT 1,
+            chat_id INTEGER,
+            tool_run_id INTEGER NOT NULL,
+            tool_name TEXT NOT NULL,
+            arguments_json TEXT NOT NULL DEFAULT '{}',
+            risk TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            resolved_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_confirmations_chat_status
+            ON confirmations(chat_id, status);
+        """,
+    )
+
+
 MIGRATIONS = (
     ("0001_workspaces", m1_workspaces),
     ("0002_soft_delete", m2_soft_delete),
     ("0003_memories_domain", m3_memories_domain),
     ("0004_tasks_and_friends", m4_tasks_and_friends),
+    ("0005_confirmations", m5_confirmations),
 )
 
 

@@ -55,6 +55,22 @@ def test_tags_endpoint(client):
     assert res.json()["tags"]["alpha"] == 1
 
 
+def test_task_crud_endpoints(client):
+    created = client.post(
+        "/api/tasks",
+        json={"title": "Подготовить демо", "description": "проверить UI", "priority": 2},
+    )
+    assert created.status_code == 200
+    task_id = created.json()["id"]
+    assert client.get("/api/tasks").json()["tasks"][0]["id"] == task_id
+    updated = client.patch(
+        f"/api/tasks/{task_id}", json={"description": "готово к проверке"}
+    )
+    assert updated.json()["description"] == "готово к проверке"
+    assert client.post(f"/api/tasks/{task_id}/complete").json()["status"] == "done"
+    assert client.get("/api/tasks", params={"status": "done"}).json()["tasks"][0]["id"] == task_id
+
+
 # ---------------------------- chats ----------------------------
 
 
@@ -201,14 +217,14 @@ def test_folder_description_in_context(client):
 
     original = client.app.state.services.llm.generate
 
-    def spy(messages, max_new_tokens=None):
+    def spy(messages, max_new_tokens=None, tools=None):
         # Capture only the chat system prompt; ignore the extractor call which
         # follows in the same request and has a different system message.
         captured.setdefault(
             "system",
             next(m["content"] for m in messages if m["role"] == "system"),
         )
-        yield from original(messages, max_new_tokens)
+        yield from original(messages, max_new_tokens, tools=tools)
 
     client.app.state.services.llm.generate = spy
     try:
@@ -267,4 +283,3 @@ def test_export_chat_markdown(client):
     assert "# Мой диалог" in text
     assert "привет" in text
     assert "Пользователь" in text
-

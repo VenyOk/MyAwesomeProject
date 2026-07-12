@@ -56,6 +56,7 @@ def test_migrations_create_expected_tables(tmp_path: Path):
         "tool_runs",
         "summaries",
         "outbox",
+        "confirmations",
     ):
         assert expected in tables
     conn.close()

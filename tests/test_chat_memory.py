@@ -32,7 +32,7 @@ class _RoutingLLM:
     def is_loaded(self) -> bool:
         return True
 
-    def generate(self, messages, max_new_tokens=None):
+    def generate(self, messages, max_new_tokens=None, tools=None):
         sys_text = messages[0]["content"] if messages else ""
         user_text = messages[-1]["content"] if messages else ""
         if "модуль извлечения памяти" in sys_text:
@@ -58,9 +58,16 @@ class _RoutingLLM:
 
 @pytest.fixture
 def chat_client(tmp_path):
+    from app.agent.tool_registry import build_default_registry
+    from app.agent.store import AgentStore
+    from app.tasks.store import TaskStore
+
     settings = Settings()
     store = MemoryStore(tmp_path / "brain.db")
     chat_store = ChatStore(tmp_path / "chats.db")
+    task_store = TaskStore(tmp_path / "brain.db")
+    agent_store = AgentStore(tmp_path / "brain.db")
+    tool_registry = build_default_registry()
     embedder = FakeEmbedder(dim=16)
     index = BruteForceIndex(dim=16)
     recall = RecallService(store, embedder, index)
@@ -72,7 +79,9 @@ def chat_client(tmp_path):
     )
     services = Services(
         settings=settings, store=store, recall=recall, session=session,
-        llm=llm, ctx=ctx, chat_store=chat_store,
+        llm=llm, ctx=ctx, chat_store=chat_store, task_store=task_store,
+        tool_registry=tool_registry,
+        agent_store=agent_store,
     )
     from fastapi.testclient import TestClient
     with TestClient(create_app(services)) as c:

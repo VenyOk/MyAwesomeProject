@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from app.chat.commands import CommandContext
+from app.agent.store import AgentStore
 from app.chat.session import ChatSession
 from app.chat.store import ChatStore
 from app.config import Settings
@@ -73,7 +74,7 @@ class FakeLLM:
     def is_loaded(self) -> bool:
         return True
 
-    def generate(self, messages, max_new_tokens=None):
+    def generate(self, messages, max_new_tokens=None, tools=None):
         yield "Ответ "
         yield "от FakeLLM."
 
@@ -85,6 +86,9 @@ def store(tmp_path):
 
 @pytest.fixture
 def services(tmp_path):
+    from app.agent.tool_registry import build_default_registry
+    from app.tasks.store import TaskStore
+
     settings = Settings()
     store = MemoryStore(tmp_path / "brain.db")
     embedder = FakeEmbedder(dim=16)
@@ -93,6 +97,9 @@ def services(tmp_path):
     session = ChatSession()
     llm = FakeLLM()
     chat_store = ChatStore(tmp_path / "chats.db")
+    task_store = TaskStore(tmp_path / "brain.db")
+    agent_store = AgentStore(tmp_path / "brain.db")
+    tool_registry = build_default_registry()
     ctx = CommandContext(
         store=store, recall=recall, session=session, llm=llm, settings=settings,
         chat_store=chat_store,
@@ -105,6 +112,9 @@ def services(tmp_path):
         llm=llm,
         ctx=ctx,
         chat_store=chat_store,
+        task_store=task_store,
+        tool_registry=tool_registry,
+        agent_store=agent_store,
     )
 
 

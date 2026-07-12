@@ -817,6 +817,43 @@ html.light .edit-actions button:first-child { color: #fff; }
 }
 .composer-preview .preview-empty { color: var(--muted-2); font-style: italic; }
 
+/* ---------------- tool confirmations ---------------- */
+
+.confirmation-card {
+  width: min(620px, 100%);
+  margin: 10px 0 18px;
+  padding: 14px;
+  border: 1px solid #e2ad4e;
+  border-radius: 12px;
+  background: rgba(226, 173, 78, 0.08);
+}
+.confirmation-title { font-weight: 700; color: #e9bd67; }
+.confirmation-copy { color: var(--muted); font-size: 13px; margin-top: 5px; }
+.confirmation-card pre {
+  margin: 10px 0;
+  padding: 8px;
+  overflow-x: auto;
+  border-radius: 7px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12px;
+}
+.confirmation-actions { display: flex; gap: 8px; }
+.confirmation-actions button {
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  font-family: inherit;
+}
+.confirmation-actions button.danger {
+  border-color: var(--danger);
+  background: transparent;
+  color: var(--danger);
+}
+
 /* ---------------- print (PDF export) ---------------- */
 
 @media print {
@@ -842,6 +879,7 @@ html.light .edit-actions button:first-child { color: #fff; }
 
 /* ===== Memory view ===== */
 .memory-view { display: flex; flex-direction: column; height: 100%; max-width: 760px; margin: 0 auto; width: 100%; }
+.tasks-view { display: flex; flex-direction: column; height: 100%; max-width: 760px; margin: 0 auto; width: 100%; }
 .memory-topbar { display: flex; align-items: center; gap: 10px; padding: 12px 8px; border-bottom: 1px solid var(--border); }
 .back-btn { padding: 6px 12px; background: transparent; border: 1px solid var(--border); color: var(--text); border-radius: 8px; cursor: pointer; }
 .memory-title { font-size: 18px; font-weight: 600; }
@@ -870,3 +908,21 @@ html.light .edit-actions button:first-child { color: #fff; }
 .memory-edit textarea { width: 100%; background: var(--bg, #0b1020); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px; font-family: inherit; font-size: 14px; resize: vertical; }
 .memory-edit-row { display: flex; gap: 6px; margin-top: 6px; }
 .memory-edit-row button { padding: 4px 12px; background: transparent; border: 1px solid var(--border); color: var(--text); border-radius: 6px; cursor: pointer; font-size: 12px; }
+
+/* ===== Tasks view ===== */
+.task-create { display: flex; gap: 8px; padding: 8px 4px 12px; }
+.task-create input { min-width: 0; flex: 1; padding: 9px 10px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font: inherit; }
+.task-create input[type="datetime-local"] { flex: 0 1 210px; }
+.task-create button { padding: 8px 11px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; font: inherit; }
+.task-create button:disabled { opacity: 0.5; cursor: default; }
+.task-card { display: flex; align-items: flex-start; gap: 10px; margin: 0 4px 8px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); }
+.task-card.status-done, .task-card.status-cancelled { opacity: 0.65; }
+.task-check { flex: 0 0 auto; width: 25px; height: 25px; border: 1px solid var(--accent); border-radius: 50%; background: transparent; color: var(--accent); cursor: pointer; font-size: 15px; }
+.task-check:disabled { border-color: var(--muted-2); color: var(--muted-2); cursor: default; }
+.task-main { min-width: 0; flex: 1; }
+.task-title { font-weight: 650; }
+.status-done .task-title, .status-cancelled .task-title { text-decoration: line-through; }
+.task-description, .task-due { margin-top: 4px; color: var(--muted); font-size: 12.5px; }
+.task-actions { display: flex; gap: 5px; }
+.task-actions button { padding: 4px 7px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: 12px; }
+.task-actions button.danger { border-color: var(--danger); color: var(--danger); }

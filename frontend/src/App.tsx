@@ -3,8 +3,11 @@ import Sidebar from "./components/Sidebar";
 import Composer from "./components/Composer";
 import Message from "./components/Message";
 import MemoryView from "./components/MemoryView";
+import TasksView from "./components/TasksView";
 import {
   type Chat,
+  type ChatEvent,
+  type Confirmation,
   type Folder,
   type Health,
   type Msg,
@@ -18,9 +21,11 @@ import {
   getHealth,
   getMessages,
   listChats,
+  listConfirmations,
   listFolders,
   renameChat,
   runCommand,
+  resolveConfirmation,
   setPinned,
   moveChat,
   streamChat,
@@ -52,9 +57,10 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [health, setHealth] = useState<Health | null>(null);
+  const [confirmations, setConfirmations] = useState<Confirmation[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">(loadTheme);
-  const [view, setView] = useState<"chat" | "memory">("chat");
+  const [view, setView] = useState<"chat" | "memory" | "tasks">("chat");
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -82,6 +88,10 @@ export default function App() {
     setMessages(msgs);
   }, []);
 
+  const refreshConfirmations = useCallback(async (id: number) => {
+    setConfirmations(await listConfirmations(id));
+  }, []);
+
   // ref to always read latest drafts without re-creating selectChat on every draft change
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
@@ -91,8 +101,9 @@ export default function App() {
       setCurrentId(id);
       setInput(draftsRef.current[id] ?? "");
       loadMessages(id);
+      refreshConfirmations(id);
     },
-    [loadMessages]
+    [loadMessages, refreshConfirmations]
   );
 
   // persist current chat draft to localStorage (debounced, no per-keystroke re-render)
@@ -202,12 +213,17 @@ export default function App() {
     setStreaming(true);
     const controller = new AbortController();
     abortRef.current = controller;
+    const onEvent = (event: ChatEvent) => {
+      if (event.type === "confirmation_required") {
+        setConfirmations((items) => [event.confirmation, ...items]);
+      }
+    };
     try {
       const done = await streamChat(currentId, text, (tok) => {
         setMessages((m) =>
           m.map((x) => (x.id === placeholderId ? { ...x, content: x.content + tok } : x))
         );
-      }, controller.signal);
+      }, controller.signal, onEvent);
       if (done) {
         setMessages((m) => m.filter((x) => x.id !== placeholderId).concat(done.assistant_message));
       } else {
@@ -286,12 +302,17 @@ export default function App() {
     setStreaming(true);
     const controller = new AbortController();
     abortRef.current = controller;
+    const onEvent = (event: ChatEvent) => {
+      if (event.type === "confirmation_required") {
+        setConfirmations((items) => [event.confirmation, ...items]);
+      }
+    };
     try {
       const done = await streamChat(currentId, text, (tok) => {
         setMessages((m) =>
           m.map((x) => (x.id === placeholderId ? { ...x, content: x.content + tok } : x))
         );
-      }, controller.signal);
+      }, controller.signal, onEvent);
       if (done) {
         setMessages((m) => {
           const cleaned = m.filter((x) => x.id !== placeholderId && x.id !== userBubble.id);
@@ -317,6 +338,21 @@ export default function App() {
   }, [input, busy, currentId, refreshHealth]);
 
   const stop = useCallback(() => { abortRef.current?.abort(); }, []);
+
+  const resolvePendingConfirmation = useCallback(async (
+    id: number,
+    decision: "approve" | "reject"
+  ) => {
+    const response = await resolveConfirmation(id, decision);
+    setConfirmations((items) => items.filter((item) => item.id !== id));
+    if (response.result.error) {
+      setMessages((items) => [...items, {
+        id: -Date.now(), chat_id: currentId ?? 0, role: "system",
+        content: `Действие не выполнено: ${String(response.result.error)}`,
+        created_at: new Date().toISOString(), edited_at: null, local: true,
+      }]);
+    }
+  }, [currentId]);
 
   const handleExportMd = useCallback(async () => {
     if (currentId == null) return;
@@ -354,12 +390,17 @@ export default function App() {
         onDeleteFolder={removeFolder}
         onThemeChange={setTheme}
         onOpenMemory={() => { setView("memory"); setSidebarOpen(false); }}
+        onOpenTasks={() => { setView("tasks"); setSidebarOpen(false); }}
         onClose={() => setSidebarOpen(false)}
       />
       {sidebarOpen && <div className="overlay" onClick={() => setSidebarOpen(false)} />}
       {view === "memory" ? (
         <main className="chat">
           <MemoryView onClose={() => setView("chat")} />
+        </main>
+      ) : view === "tasks" ? (
+        <main className="chat">
+          <TasksView onClose={() => setView("chat")} />
         </main>
       ) : (
       <main className="chat">
@@ -388,6 +429,19 @@ export default function App() {
               onDelete={handleDeleteMessage}
               onEditAndRegenerate={handleEditAndRegenerate}
             />
+          ))}
+          {confirmations.map((confirmation) => (
+            <section className="confirmation-card" key={confirmation.id}>
+              <div className="confirmation-title">Требуется подтверждение</div>
+              <div className="confirmation-copy">
+                <code>{confirmation.tool_name}</code> · {confirmation.risk}
+              </div>
+              <pre>{JSON.stringify(confirmation.arguments, null, 2)}</pre>
+              <div className="confirmation-actions">
+                <button onClick={() => resolvePendingConfirmation(confirmation.id, "approve")}>Подтвердить</button>
+                <button className="danger" onClick={() => resolvePendingConfirmation(confirmation.id, "reject")}>Отклонить</button>
+              </div>
+            </section>
           ))}
         </div>
         <Composer

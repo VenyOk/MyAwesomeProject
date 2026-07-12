@@ -199,6 +199,48 @@ export type Memory = {
   deleted_at: string | null;
 };
 
+export type Task = {
+  id: number;
+  title: string;
+  description: string;
+  status: "open" | "done" | "cancelled";
+  priority: number;
+  due_at: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+export async function listTasks(status?: string): Promise<Task[]> {
+  const suffix = status ? `?status=${encodeURIComponent(status)}` : "?status=";
+  const data = await jget<{ tasks: Task[] }>(`${BASE}/tasks${suffix}`);
+  return data.tasks;
+}
+
+export function createTask(task: {
+  title: string; description?: string; due_at?: string | null; priority?: number;
+}): Promise<Task> {
+  return jpost<Task>(`${BASE}/tasks`, task);
+}
+
+export async function updateTask(id: number, patch: Partial<Pick<Task, "title" | "description" | "due_at" | "priority">>): Promise<Task> {
+  const response = await fetch(`${BASE}/tasks/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+export function completeTask(id: number): Promise<Task> {
+  return jpost<Task>(`${BASE}/tasks/${id}/complete`, {});
+}
+
+export function cancelTask(id: number): Promise<Task> {
+  return jpost<Task>(`${BASE}/tasks/${id}/cancel`, {});
+}
+
 export async function listMemories(params?: {
   q?: string; status?: string; kind?: string; limit?: number;
 }): Promise<{ memories: Memory[]; count: number }> {
@@ -243,11 +285,41 @@ export type ChatDone = {
   title: string;
 };
 
+export type Confirmation = {
+  id: number;
+  chat_id: number | null;
+  tool_name: string;
+  arguments: Record<string, unknown>;
+  risk: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+  resolved_at: string | null;
+};
+
+export type ChatEvent =
+  | { type: "confirmation_required"; confirmation: Confirmation }
+  | { type: "tool_started" | "tool_finished" | "tool_error"; [key: string]: unknown };
+
+export async function listConfirmations(chatId: number): Promise<Confirmation[]> {
+  const data = await jget<{ confirmations: Confirmation[] }>(
+    `${BASE}/confirmations?chat_id=${chatId}`
+  );
+  return data.confirmations;
+}
+
+export async function resolveConfirmation(
+  id: number,
+  decision: "approve" | "reject"
+): Promise<{ confirmation: Confirmation; result: Record<string, unknown> }> {
+  return jpost(`${BASE}/confirmations/${id}/${decision}`, {});
+}
+
 export async function streamChat(
   chatId: number,
   message: string,
   onToken: (token: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onEvent?: (event: ChatEvent) => void
 ): Promise<ChatDone | null> {
   const res = await fetch(`${BASE}/chat`, {
     method: "POST",
@@ -274,6 +346,7 @@ export async function streamChat(
         if (!line.startsWith("data:")) continue;
         const payload = JSON.parse(line.slice(5).trim());
         if (payload.token) onToken(payload.token);
+        if (payload.type) onEvent?.(payload as ChatEvent);
         if (payload.done) donePayload = payload as ChatDone;
       }
     }

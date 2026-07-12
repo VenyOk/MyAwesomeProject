@@ -20,6 +20,7 @@ class ChatCompletionRequest(BaseModel):
     top_p: float = Field(default=0.95, gt=0.0, le=1.0)
     top_k: int = Field(default=20, ge=1, le=200)
     chat_template_kwargs: dict = Field(default_factory=dict)
+    tools: list[dict] | None = None
 
 
 class QwenRuntime:
@@ -68,11 +69,16 @@ class QwenRuntime:
         from transformers import TextIteratorStreamer
 
         thinking = bool(request.chat_template_kwargs.get("enable_thinking", False))
+        template_kwargs: dict = {
+            "tokenize": False,
+            "add_generation_prompt": True,
+            "enable_thinking": thinking,
+        }
+        if request.tools:
+            template_kwargs["tools"] = request.tools
         prompt = self.processor.apply_chat_template(
             request.messages,
-            tokenize=False,
-            add_generation_prompt=True,
-            enable_thinking=thinking,
+            **template_kwargs,
         )
         inputs = self.processor(
             text=prompt,
