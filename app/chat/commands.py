@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Any, Callable
 
 from app.chat.session import ChatSession, DEFAULT_PERSONA
 from app.chat.store import ChatStore
@@ -22,6 +22,7 @@ class CommandContext:
     chat_store: ChatStore
     current_chat_id: int | None = None
     persona: str = DEFAULT_PERSONA
+    tool_executor: Callable[[str, dict], list[Any]] | None = None
 
 
 @dataclass
@@ -29,6 +30,55 @@ class CommandResult:
     text: str | None = None
     error: bool = False
     is_command: bool = True
+    tool_run_id: int | None = None
+    tool_events: list[dict] = field(default_factory=list)
+    confirmation: dict | None = None
+
+
+@dataclass
+class _SharedToolResult:
+    result: dict | None = None
+    tool_run_id: int | None = None
+    tool_events: list[dict] = field(default_factory=list)
+    confirmation: dict | None = None
+
+
+def _run_shared_tool(
+    ctx: CommandContext, tool_name: str, arguments: dict
+) -> _SharedToolResult | None:
+    """Run a slash command through the application's common tool lifecycle."""
+    if ctx.tool_executor is None:
+        return None
+
+    shared = _SharedToolResult()
+    for event in ctx.tool_executor(tool_name, arguments):
+        payload = dict(event.payload)
+        shared.tool_events.append({"type": event.kind, **payload})
+        if shared.tool_run_id is None:
+            shared.tool_run_id = payload.get("tool_run_id")
+        if event.kind in {"tool_finished", "tool_error"}:
+            shared.result = payload.get("result")
+        elif event.kind == "confirmation_required":
+            shared.confirmation = payload.get("confirmation")
+    return shared
+
+
+def _shared_result_kwargs(shared: _SharedToolResult) -> dict:
+    return {
+        "tool_run_id": shared.tool_run_id,
+        "tool_events": shared.tool_events,
+        "confirmation": shared.confirmation,
+    }
+
+
+def _shared_error(shared: _SharedToolResult) -> CommandResult | None:
+    if not shared.result or "error" not in shared.result:
+        return None
+    return CommandResult(
+        text=f"Command failed: {shared.result['error']}",
+        error=True,
+        **_shared_result_kwargs(shared),
+    )
 
 
 CommandHandler = Callable[[str, CommandContext], CommandResult]
@@ -59,6 +109,20 @@ def cmd_save(args: str, ctx: CommandContext) -> CommandResult:
     text = args.strip()
     if not text:
         return CommandResult(text="Usage: /save <text to remember>", error=True)
+    shared = _run_shared_tool(
+        ctx,
+        "memory.create",
+        {"content": text, "kind": "fact", "source": "manual"},
+    )
+    if shared is not None:
+        error = _shared_error(shared)
+        if error is not None:
+            return error
+        memory_id = shared.result["id"] if shared.result else None
+        return CommandResult(
+            text=f"Saved as memory #{memory_id}.",
+            **_shared_result_kwargs(shared),
+        )
     mem = ctx.store.add(content=text, source="manual")
     ctx.recall.add_memory(mem)
     return CommandResult(text=f"Saved as memory #{mem.id}.")
@@ -68,6 +132,26 @@ def cmd_search(args: str, ctx: CommandContext) -> CommandResult:
     query = args.strip()
     if not query:
         return CommandResult(text="Usage: /search <query>", error=True)
+    shared = _run_shared_tool(ctx, "memory.search", {"query": query})
+    if shared is not None:
+        error = _shared_error(shared)
+        if error is not None:
+            return error
+        rows = shared.result.get("results", []) if shared.result else []
+        memories = [
+            Memory(
+                id=int(row["id"]),
+                content=str(row["content"]),
+                kind=str(row.get("kind", "fact")),
+                tags=list(row.get("tags", [])),
+            )
+            for row in rows
+        ]
+        scores = [float(row["score"]) for row in rows]
+        return CommandResult(
+            text="Search results:\n" + _format_memories(memories, scores),
+            **_shared_result_kwargs(shared),
+        )
     hits = ctx.recall.recall(query, k=ctx.settings.recall_top_k)
     memories = [m for m, _ in hits]
     scores = [s for _, s in hits]
@@ -113,6 +197,28 @@ def cmd_forget(args: str, ctx: CommandContext) -> CommandResult:
         memory_id = int(args.strip())
     except ValueError:
         return CommandResult(text="Usage: /forget <id>", error=True)
+    if ctx.tool_executor is not None and ctx.store.get(memory_id) is None:
+        return CommandResult(text=f"Memory #{memory_id} not found.", error=True)
+    shared = _run_shared_tool(ctx, "memory.delete", {"id": memory_id})
+    if shared is not None:
+        error = _shared_error(shared)
+        if error is not None:
+            if shared.result and shared.result.get("error") == "memory not found":
+                return CommandResult(
+                    text=f"Memory #{memory_id} not found.",
+                    error=True,
+                    **_shared_result_kwargs(shared),
+                )
+            return error
+        if shared.confirmation is not None:
+            return CommandResult(
+                text="Нужно ваше подтверждение для этого действия.",
+                **_shared_result_kwargs(shared),
+            )
+        return CommandResult(
+            text=f"Forgot memory #{memory_id}.",
+            **_shared_result_kwargs(shared),
+        )
     if ctx.store.delete(memory_id):
         ctx.recall.rebuild_from_store()
         return CommandResult(text=f"Forgot memory #{memory_id}.")

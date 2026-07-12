@@ -30,23 +30,43 @@ from tests.conftest import BruteForceIndex, FakeEmbedder, FakeLLM
 def build_fake_services() -> Services:
     db_path = Path(tempfile.gettempdir()) / "second_brain_dev.db"
     store = MemoryStore(db_path)
-    chat_store = ChatStore(Path(tempfile.gettempdir()) / "second_brain_dev_chats.db")
+    chat_db_path = Path(tempfile.gettempdir()) / "second_brain_dev_chats.db"
+    chat_store = ChatStore(chat_db_path)
     # keep the dev db on the same versioned schema as the real one
     from app.db.migrations import run_migrations
-
-    run_migrations(chat_store._conn, db_path)
     from app.agent.tool_registry import build_default_registry
+    from app.jobs.outbox import OutboxStore
+    from app.jobs.scheduler import ReminderScheduler
+    from app.tasks.reminders import ReminderStore
     from app.tasks.store import TaskStore
 
     task_store = TaskStore(db_path)
+    run_migrations(task_store._conn, db_path)
+    run_migrations(chat_store._conn, chat_db_path)
+    reminder_store = ReminderStore(db_path)
+    outbox_store = OutboxStore(db_path)
+    reminder_scheduler = ReminderScheduler(
+        reminder_store,
+        outbox_store,
+        quiet_hours_start=settings.quiet_hours_start,
+        quiet_hours_end=settings.quiet_hours_end,
+    )
     agent_store = AgentStore(db_path)
     tool_registry = build_default_registry()
     embedder = FakeEmbedder(dim=16)
     index = BruteForceIndex(dim=16)
-    recall = RecallService(store, embedder, index)
+    recall = RecallService(
+        store,
+        embedder,
+        index,
+        context_token_budget=settings.recall_context_token_budget,
+    )
     session = ChatSession()
     llm = (
-        OpenAICompatibleLLM(settings)
+        OpenAICompatibleLLM(
+            settings,
+            supports_native_tool_calls=settings.llm_provider != "qwen_server",
+        )
         if os.getenv("DEV_USE_REAL_LLM") == "1"
         else FakeLLM()
     )
@@ -57,7 +77,8 @@ def build_fake_services() -> Services:
     return Services(
         settings=settings, store=store, recall=recall, session=session, llm=llm,
         ctx=ctx, chat_store=chat_store, task_store=task_store, tool_registry=tool_registry,
-        agent_store=agent_store,
+        agent_store=agent_store, reminder_store=reminder_store,
+        outbox_store=outbox_store, reminder_scheduler=reminder_scheduler,
     )
 
 

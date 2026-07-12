@@ -1,0 +1,117 @@
+{
+  "id": "second-brain-russian-retrieval-v1",
+  "language": "ru",
+  "description": "Synthetic, curated smoke set for Russian personal-knowledge retrieval. It contains no user data.",
+  "corpus": [
+    {
+      "id": "meeting_anna",
+      "text": "Во вторник в 11:00 встреча с Анной Петровой: обсудить дизайн мобильного приложения."
+    },
+    {
+      "id": "task_prod_422",
+      "text": "Тикет PROD-422: исправить ошибку авторизации перед релизом, ответственный — Илья."
+    },
+    {
+      "id": "project_orbit",
+      "text": "Для проекта Orbit нужно подготовить MVP поиска по заметкам и показать демо в пятницу."
+    },
+    {
+      "id": "trip_kazan",
+      "text": "Поездка в Казань: поезд отправляется 3 августа утром, гостиница рядом с Кремлём."
+    },
+    {
+      "id": "book_design",
+      "text": "Сохранить рекомендацию: книга «Не заставляйте меня думать» полезна для изучения UX-дизайна."
+    },
+    {
+      "id": "dentist_visit",
+      "text": "Записаться к стоматологу на профилактический осмотр в следующем месяце."
+    },
+    {
+      "id": "llm_article",
+      "text": "Прочитать статью о RAG: гибридный поиск объединяет полнотекстовый индекс и эмбеддинги."
+    },
+    {
+      "id": "subscription_review",
+      "text": "В конце месяца проверить подписки: сервис музыки и облачное хранилище можно отменить."
+    },
+    {
+      "id": "reminder_idea",
+      "text": "Идея для второго мозга: по пятницам автоматически присылать пользователю краткое саммари недели."
+    },
+    {
+      "id": "python_course",
+      "text": "Продолжить курс Python: следующий модуль посвящён асинхронным HTTP-запросам."
+    },
+    {
+      "id": "pasta_recipe",
+      "text": "Рецепт ужина: паста с томатами, базиликом и пармезаном готовится за двадцать минут."
+    },
+    {
+      "id": "podcast_episode",
+      "text": "Послушать выпуск подкаста о привычках и планировании: рекомендовал Сергей."
+    }
+  ],
+  "queries": [
+    {
+      "id": "q_anna",
+      "text": "Когда созвон с Аней Петровой?",
+      "relevant_ids": ["meeting_anna"]
+    },
+    {
+      "id": "q_prod_422",
+      "text": "Что нужно сделать по PROD-422?",
+      "relevant_ids": ["task_prod_422"]
+    },
+    {
+      "id": "q_orbit_demo",
+      "text": "К какому дню надо показать демо поиска для Orbit?",
+      "relevant_ids": ["project_orbit"]
+    },
+    {
+      "id": "q_kazan",
+      "text": "Во сколько и когда еду в Казань?",
+      "relevant_ids": ["trip_kazan"]
+    },
+    {
+      "id": "q_ux_book",
+      "text": "Какую книгу мне советовали по UX?",
+      "relevant_ids": ["book_design"]
+    },
+    {
+      "id": "q_dentist",
+      "text": "Напомни про визит к зубному врачу.",
+      "relevant_ids": ["dentist_visit"]
+    },
+    {
+      "id": "q_hybrid_rag",
+      "text": "Где была заметка о сочетании FTS и семантического поиска?",
+      "relevant_ids": ["llm_article"]
+    },
+    {
+      "id": "q_spending",
+      "text": "Какие регулярные траты стоит пересмотреть?",
+      "relevant_ids": ["subscription_review"]
+    },
+    {
+      "id": "q_week_summary",
+      "text": "Какую автоматизацию еженедельного обзора я придумал?",
+      "relevant_ids": ["reminder_idea"]
+    },
+    {
+      "id": "q_async_python",
+      "text": "Что изучать дальше в обучении Python?",
+      "relevant_ids": ["python_course"]
+    },
+    {
+      "id": "q_dinner",
+      "text": "Что быстро приготовить на ужин из пасты?",
+      "relevant_ids": ["pasta_recipe"]
+    },
+    {
+      "id": "q_sergey",
+      "text": "Какой подкаст советовал Сергей?",
+      "relevant_ids": ["podcast_episode"]
+    }
+  ]
+}

@@ -24,6 +24,10 @@ class GemmaLLM:
     def thinking(self, value: bool) -> None:
         self._thinking = bool(value)
 
+    @property
+    def supports_native_tool_calls(self) -> bool:
+        return False
+
     def is_loaded(self) -> bool:
         return self._model is not None
 

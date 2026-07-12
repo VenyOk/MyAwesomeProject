@@ -83,7 +83,13 @@ def _handle_memory_search(services: Any, args) -> dict:
     hits = services.recall.recall(args.query, k=services.settings.recall_top_k)
     return {
         "results": [
-            {"id": m.id, "kind": m.kind, "content": m.content, "score": round(s, 3)}
+            {
+                "id": m.id,
+                "kind": m.kind,
+                "content": m.content,
+                "tags": m.tags,
+                "score": round(s, 3),
+            }
             for m, s in hits
         ],
         "count": len(hits),
@@ -91,10 +97,11 @@ def _handle_memory_search(services: Any, args) -> dict:
 
 
 def _handle_memory_create(services: Any, args) -> dict:
+    source_type = "manual" if args.source == "manual" else "chat"
     mem = services.store.add(
         content=args.content,
-        source="agent",
-        source_type="chat",
+        source=args.source,
+        source_type=source_type,
         kind=args.kind,
         status="active",
     )
@@ -149,6 +156,63 @@ def _handle_task_cancel(services: Any, args) -> dict:
     return {"id": task.id, "status": task.status, "title": task.title}
 
 
+def _get_reminder_store(services: Any):
+    store = getattr(services, "reminder_store", None)
+    if store is None:
+        raise RuntimeError("reminder storage is unavailable")
+    return store
+
+
+def _handle_reminder_create(services: Any, args) -> dict:
+    if args.task_id is not None and services.task_store.get(args.task_id) is None:
+        return {"error": "task not found"}
+    timezone_name = args.timezone or services.settings.timezone
+    reminder = _get_reminder_store(services).create(
+        args.title,
+        args.scheduled_at,
+        task_id=args.task_id,
+        timezone_name=timezone_name,
+    )
+    scheduler = getattr(services, "reminder_scheduler", None)
+    if scheduler is not None:
+        scheduler.tick()
+        reminder = _get_reminder_store(services).get(reminder.id) or reminder
+    return {"reminder": reminder.to_dict()}
+
+
+def _handle_reminder_list(services: Any, args) -> dict:
+    status = args.status.strip() or None
+    reminders = _get_reminder_store(services).list(status=status)
+    return {"reminders": [reminder.to_dict() for reminder in reminders], "count": len(reminders)}
+
+
+def _handle_reminder_cancel(services: Any, args) -> dict:
+    reminder = _get_reminder_store(services).cancel(args.id)
+    if reminder is None:
+        return {"error": "scheduled reminder not found"}
+    return {"id": reminder.id, "status": reminder.status, "title": reminder.title}
+
+
+def _handle_task_create_with_reminder(services: Any, args) -> dict:
+    timezone_name = args.timezone or services.settings.timezone
+    task = services.task_store.create(
+        title=args.title,
+        description=args.description,
+        due_at=args.scheduled_at,
+    )
+    reminder = _get_reminder_store(services).create(
+        args.title,
+        args.scheduled_at,
+        task_id=task.id,
+        timezone_name=timezone_name,
+    )
+    scheduler = getattr(services, "reminder_scheduler", None)
+    if scheduler is not None:
+        scheduler.tick()
+        reminder = _get_reminder_store(services).get(reminder.id) or reminder
+    return {"task": task.to_dict(), "reminder": reminder.to_dict()}
+
+
 def build_default_registry() -> ToolRegistry:
     """Construct the allowlisted MVP tool registry."""
     from app.agent.schemas import (
@@ -159,6 +223,10 @@ def build_default_registry() -> ToolRegistry:
         TaskCreateArgs,
         TaskIdArgs,
         TaskListArgs,
+        ReminderCreateArgs,
+        ReminderIdArgs,
+        ReminderListArgs,
+        TaskWithReminderArgs,
     )
 
     reg = ToolRegistry()
@@ -168,6 +236,17 @@ def build_default_registry() -> ToolRegistry:
             description="Найти сохранённые воспоминания/факты о пользователе по теме или фразе.",
             args_schema=MemorySearchArgs,
             handler=_handle_memory_search,
+        )
+    )
+    reg.register(
+        ToolDefinition(
+            name="task.create_with_reminder",
+            description=(
+                "Создать связанную задачу и одноразовое локальное напоминание. "
+                "Используй, когда пользователь пишет «напомни» и указывает дату/время."
+            ),
+            args_schema=TaskWithReminderArgs,
+            handler=_handle_task_create_with_reminder,
         )
     )
     reg.register(
@@ -224,6 +303,30 @@ def build_default_registry() -> ToolRegistry:
             description="Отменить открытую задачу по её ID.",
             args_schema=TaskIdArgs,
             handler=_handle_task_cancel,
+        )
+    )
+    reg.register(
+        ToolDefinition(
+            name="reminder.create",
+            description="Создать одноразовое локальное напоминание, при необходимости связав его с существующей задачей.",
+            args_schema=ReminderCreateArgs,
+            handler=_handle_reminder_create,
+        )
+    )
+    reg.register(
+        ToolDefinition(
+            name="reminder.list",
+            description="Показать запланированные, сработавшие или отменённые напоминания пользователя.",
+            args_schema=ReminderListArgs,
+            handler=_handle_reminder_list,
+        )
+    )
+    reg.register(
+        ToolDefinition(
+            name="reminder.cancel",
+            description="Отменить запланированное напоминание по его ID.",
+            args_schema=ReminderIdArgs,
+            handler=_handle_reminder_cancel,
         )
     )
     return reg

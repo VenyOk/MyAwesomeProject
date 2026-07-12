@@ -12,10 +12,17 @@ from app.llm.base import LLMChunk, ToolCallPart
 class OpenAICompatibleLLM:
     """Streaming client for a separate local OpenAI-compatible LLM server."""
 
-    def __init__(self, settings: Settings, transport: httpx.BaseTransport | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        transport: httpx.BaseTransport | None = None,
+        *,
+        supports_native_tool_calls: bool = True,
+    ):
         self.settings = settings
         self._thinking = settings.thinking_enabled
         self._transport = transport
+        self._supports_native_tool_calls = supports_native_tool_calls
 
     @property
     def thinking(self) -> bool:
@@ -24,6 +31,10 @@ class OpenAICompatibleLLM:
     @thinking.setter
     def thinking(self, value: bool) -> None:
         self._thinking = bool(value)
+
+    @property
+    def supports_native_tool_calls(self) -> bool:
+        return self._supports_native_tool_calls
 
     @property
     def _headers(self) -> dict[str, str]:

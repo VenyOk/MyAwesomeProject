@@ -34,8 +34,14 @@ class Settings:
     llm_request_timeout: float = field(
         default_factory=lambda: float(os.getenv("LLM_REQUEST_TIMEOUT", "120"))
     )
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    embedding_dim: int = 384
+    embedding_model: str = field(
+        default_factory=lambda: os.getenv(
+            "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
+        )
+    )
+    embedding_dim: int = field(
+        default_factory=lambda: int(os.getenv("EMBEDDING_DIM", "384"))
+    )
 
     load_in_4bit: bool = True
     bnb_4bit_compute_dtype: str = "bfloat16"
@@ -50,11 +56,26 @@ class Settings:
     thinking_enabled: bool = False
 
     recall_top_k: int = 5
+    recall_context_token_budget: int = field(
+        default_factory=lambda: int(os.getenv("RECALL_CONTEXT_TOKEN_BUDGET", "1200"))
+    )
     recent_default: int = 10
     auto_save: bool = True
 
     host: str = "127.0.0.1"
     port: int = 8000
+    timezone: str = field(
+        default_factory=lambda: os.getenv("APP_TIMEZONE", "Europe/Moscow")
+    )
+    quiet_hours_start: str | None = field(
+        default_factory=lambda: os.getenv("QUIET_HOURS_START") or None
+    )
+    quiet_hours_end: str | None = field(
+        default_factory=lambda: os.getenv("QUIET_HOURS_END") or None
+    )
+    scheduler_interval_seconds: float = field(
+        default_factory=lambda: float(os.getenv("SCHEDULER_INTERVAL_SECONDS", "60"))
+    )
 
     @property
     def data_dir(self) -> Path:

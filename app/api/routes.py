@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 
+from app.agent.execution import execute_confirmed_tool, execute_tool
 from app.chat.commands import REGISTRY
 from app.llm.response import clean_response
+from app.tasks.reminders import normalize_scheduled_at
 
 router = APIRouter()
 
@@ -65,8 +68,44 @@ class UpdateTaskRequest(BaseModel):
     priority: int | None = None
 
 
+class CreateReminderRequest(BaseModel):
+    title: str
+    scheduled_at: str
+    task_id: int | None = None
+    timezone: str | None = None
+    recurrence_rule: str | None = None
+
+
+class UpdateReminderRequest(BaseModel):
+    title: str | None = None
+    scheduled_at: str | None = None
+    timezone: str | None = None
+    recurrence_rule: str | None = None
+
+
 def _services(request: Request):
     return request.app.state.services
+
+
+def _reminder_store(request: Request):
+    store = getattr(_services(request), "reminder_store", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="Reminder storage is unavailable")
+    return store
+
+
+def _outbox_store(request: Request):
+    store = getattr(_services(request), "outbox_store", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="Notification storage is unavailable")
+    return store
+
+
+def _validate_reminder_time(value: str, timezone_name: str) -> None:
+    try:
+        normalize_scheduled_at(value, timezone_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/health")
@@ -294,6 +333,12 @@ def list_confirmations(request: Request, chat_id: int | None = None):
     return {"confirmations": [confirmation.to_dict() for confirmation in confirmations]}
 
 
+@router.get("/tool-runs")
+def list_tool_runs(request: Request, chat_id: int | None = None):
+    tool_runs = _agent_store(request).list_tool_runs(chat_id=chat_id)
+    return {"tool_runs": [tool_run.to_dict() for tool_run in tool_runs]}
+
+
 @router.post("/confirmations/{confirmation_id}/approve")
 def approve_confirmation(confirmation_id: int, request: Request):
     services = _services(request)
@@ -301,14 +346,7 @@ def approve_confirmation(confirmation_id: int, request: Request):
     confirmation = store.resolve_confirmation(confirmation_id, approved=True)
     if confirmation is None:
         raise HTTPException(status_code=409, detail="Confirmation is no longer pending")
-    result = services.tool_registry.dispatch(
-        confirmation.tool_name, confirmation.arguments, services
-    )
-    store.finish_tool_run(
-        confirmation.tool_run_id,
-        "failed" if "error" in result else "succeeded",
-        result,
-    )
+    result = execute_confirmed_tool(services.tool_registry, services, confirmation)
     return {"confirmation": confirmation.to_dict(), "result": result}
 
 
@@ -384,17 +422,146 @@ def cancel_task(task_id: int, request: Request):
     return task.to_dict()
 
 
+# ---------------------------- reminders and notifications ----------------------------
+
+
+@router.get("/reminders")
+def list_reminders(request: Request, status: str | None = "scheduled"):
+    reminders = _reminder_store(request).list(status=status)
+    return {"reminders": [reminder.to_dict() for reminder in reminders]}
+
+
+@router.post("/reminders")
+def create_reminder(payload: CreateReminderRequest, request: Request):
+    services = _services(request)
+    timezone_name = payload.timezone or services.settings.timezone
+    _validate_reminder_time(payload.scheduled_at, timezone_name)
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="title must not be empty")
+    if payload.task_id is not None and services.task_store.get(payload.task_id) is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    reminder = _reminder_store(request).create(
+        title,
+        payload.scheduled_at,
+        task_id=payload.task_id,
+        timezone_name=timezone_name,
+        recurrence_rule=payload.recurrence_rule,
+    )
+    # A past time is a missed reminder, so surface it without waiting for the
+    # next minute-long background tick. Future reminders remain scheduled.
+    scheduler = getattr(services, "reminder_scheduler", None)
+    if scheduler is not None:
+        scheduler.tick()
+    return _reminder_store(request).get(reminder.id).to_dict()
+
+
+@router.get("/reminders/{reminder_id}")
+def get_reminder(reminder_id: int, request: Request):
+    reminder = _reminder_store(request).get(reminder_id)
+    if reminder is None:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    return reminder.to_dict()
+
+
+@router.patch("/reminders/{reminder_id}")
+def update_reminder(reminder_id: int, payload: UpdateReminderRequest, request: Request):
+    store = _reminder_store(request)
+    current = store.get(reminder_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    fields = payload.model_fields_set
+    timezone_name = payload.timezone if "timezone" in fields else current.timezone
+    if timezone_name is None:
+        raise HTTPException(status_code=422, detail="timezone must not be null")
+    if "scheduled_at" in fields:
+        if payload.scheduled_at is None:
+            raise HTTPException(status_code=422, detail="scheduled_at must not be null")
+        _validate_reminder_time(payload.scheduled_at, timezone_name)
+    elif "timezone" in fields:
+        _validate_reminder_time(current.scheduled_at, timezone_name)
+    changes = {}
+    if "title" in fields:
+        if payload.title is None or not payload.title.strip():
+            raise HTTPException(status_code=422, detail="title must not be empty")
+        changes["title"] = payload.title.strip()
+    if "scheduled_at" in fields:
+        changes["scheduled_at"] = payload.scheduled_at
+    if "timezone" in fields:
+        changes["timezone_name"] = timezone_name
+    if "recurrence_rule" in fields:
+        changes["recurrence_rule"] = payload.recurrence_rule
+    reminder = store.update(reminder_id, **changes)
+    if reminder is None:
+        raise HTTPException(status_code=409, detail="Only scheduled reminders can be updated")
+    return reminder.to_dict()
+
+
+def _cancel_reminder(reminder_id: int, request: Request):
+    reminder = _reminder_store(request).cancel(reminder_id)
+    if reminder is None:
+        raise HTTPException(status_code=404, detail="Scheduled reminder not found")
+    return reminder.to_dict()
+
+
+@router.post("/reminders/{reminder_id}/cancel")
+def cancel_reminder(reminder_id: int, request: Request):
+    return _cancel_reminder(reminder_id, request)
+
+
+@router.delete("/reminders/{reminder_id}")
+def delete_reminder(reminder_id: int, request: Request):
+    return _cancel_reminder(reminder_id, request)
+
+
+@router.get("/notifications")
+def list_notifications(request: Request):
+    notifications = _outbox_store(request).list_available()
+    return {"notifications": [notification.to_dict() for notification in notifications]}
+
+
+@router.post("/notifications/{notification_id}/ack")
+def acknowledge_notification(notification_id: int, request: Request):
+    store = _outbox_store(request)
+    item = store.get(notification_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    if item.status == "pending":
+        store.mark_sent(notification_id)
+        item = store.get(notification_id)
+    return item.to_dict()
+
+
 # ---------------------------- commands ----------------------------
 
 
 @router.post("/command")
 def command(payload: CommandRequest, request: Request):
     services = _services(request)
-    services.ctx.current_chat_id = payload.chat_id
-    result = REGISTRY.dispatch(payload.input, services.ctx)
+    command_ctx = replace(
+        services.ctx,
+        current_chat_id=payload.chat_id,
+        tool_executor=lambda tool_name, arguments: list(
+            execute_tool(
+                services.tool_registry,
+                services,
+                tool_name,
+                arguments,
+                chat_id=payload.chat_id,
+            )
+        ),
+    )
+    result = REGISTRY.dispatch(payload.input, command_ctx)
     if result is None:
         return {"is_command": False}
-    return {"is_command": True, "text": result.text, "error": result.error}
+    return {
+        "is_command": True,
+        "text": result.text,
+        "error": result.error,
+        "tool_run_id": result.tool_run_id,
+        "tool_events": result.tool_events,
+        "confirmation": result.confirmation,
+    }
 
 
 # ---------------------------- folders ----------------------------
@@ -442,17 +609,78 @@ def update_message(chat_id: int, message_id: int, payload: UpdateMessageRequest,
     if msg is None or msg.chat_id != chat_id:
         raise HTTPException(status_code=404, detail="Message not found")
     updated = services.chat_store.update_message(message_id, payload.content)
-    return updated.to_dict()
+    affected_memories = services.store.mark_for_reextraction(message_id)
+    if affected_memories:
+        services.recall.rebuild_from_store()
+    response = updated.to_dict()
+    response["memory_recheck_count"] = len(affected_memories)
+    response["memory_recheck_memory_ids"] = [memory.id for memory in affected_memories]
+    return response
 
 
-@router.delete("/chats/{chat_id}/messages/{message_id}")
-def delete_message(chat_id: int, message_id: int, request: Request):
+@router.get("/chats/{chat_id}/messages/{message_id}/memories")
+def list_message_memories(chat_id: int, message_id: int, request: Request):
     services = _services(request)
     msg = services.chat_store.get_message(message_id)
     if msg is None or msg.chat_id != chat_id:
         raise HTTPException(status_code=404, detail="Message not found")
+    memories = services.store.list_by_source_message(message_id)
+    return {"memories": [memory.to_dict() for memory in memories], "count": len(memories)}
+
+
+@router.delete("/chats/{chat_id}/messages/{message_id}")
+def delete_message(
+    chat_id: int,
+    message_id: int,
+    request: Request,
+    derived_memories: str | None = None,
+):
+    services = _services(request)
+    msg = services.chat_store.get_message(message_id)
+    if msg is None or msg.chat_id != chat_id:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if derived_memories not in (None, "keep", "delete"):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "invalid_derived_memories_action",
+                "message": "derived_memories must be either 'keep' or 'delete'",
+                "allowed_actions": ["keep", "delete"],
+            },
+        )
+
+    linked_memories = services.store.list_by_source_message(message_id)
+    if linked_memories and derived_memories is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "derived_memories_confirmation_required",
+                "message": "Choose whether to keep or delete memories derived from this message.",
+                "derived_memories": {
+                    "count": len(linked_memories),
+                    "memories": [memory.to_dict() for memory in linked_memories],
+                },
+                "allowed_actions": ["keep", "delete"],
+            },
+        )
+
+    deleted_memories = []
+    if linked_memories and derived_memories == "delete":
+        deleted_memories = services.store.delete_by_source_message(message_id)
+        services.recall.rebuild_from_store()
+
     services.chat_store.delete_message(message_id)
-    return {"deleted": message_id}
+    if not linked_memories:
+        return {"deleted": message_id}
+    selected_memories = deleted_memories if derived_memories == "delete" else linked_memories
+    return {
+        "deleted": message_id,
+        "derived_memories": {
+            "action": derived_memories,
+            "count": len(selected_memories),
+            "memories": [memory.to_dict() for memory in selected_memories],
+        },
+    }
 
 
 @router.get("/messages/search")

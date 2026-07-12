@@ -62,6 +62,15 @@ def test_migrations_create_expected_tables(tmp_path: Path):
     conn.close()
 
 
+def test_outbox_dedupe_column_is_migrated(tmp_path: Path):
+    db = tmp_path / "outbox.db"
+    conn = connect(db)
+    run_migrations(conn, db)
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(outbox)").fetchall()}
+    assert "dedupe_key" in columns
+    conn.close()
+
+
 def test_legacy_database_preserves_data_and_backs_up(tmp_path: Path):
     """A pre-existing db with user data but no migration history must be
     backed up before migration, and all existing rows preserved."""

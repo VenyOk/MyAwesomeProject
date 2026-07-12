@@ -16,8 +16,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Iterator
 
+from app.agent.execution import execute_tool
 from app.agent.parser import ParsedToolCall, parse_tool_calls, strip_tool_calls
-from app.agent.policies import decide
 
 
 @dataclass
@@ -72,9 +72,11 @@ def run_turn(
 ) -> Iterator[ToolEvent]:
     """Run one user turn, possibly invoking tools, yielding events."""
     tools_schema = registry.openai_schema()
-    # Prefer native structured tool calls (ollama); fall back to Hermes XML
-    # parsing for providers that only emit text (transformers/GemmaLLM/FakeLLM).
-    use_native = hasattr(llm, "generate_with_tools")
+    # qwen_server exposes the same HTTP endpoint as Ollama but streams
+    # text/XML, so method presence alone is not a reliable capability check.
+    use_native = bool(getattr(llm, "supports_native_tool_calls", False)) and callable(
+        getattr(llm, "generate_with_tools", None)
+    )
     turn_fn = _run_native_turn if use_native else _run_hermes_turn
     working = list(messages)
 
@@ -108,71 +110,35 @@ def run_turn(
             working.append({"role": "assistant", "content": prose + _serialize_hermes(calls) if prose else _serialize_hermes(calls)})
 
         for call in calls:
-            decision = decide(call.name)
-            agent_store = getattr(services, "agent_store", None)
-            tool_run_id = None
-            if agent_store is not None:
-                tool_run_id = agent_store.start_tool_run(
-                    call.name,
-                    call.arguments,
-                    chat_id=chat_id,
-                    policy_decision=decision.risk,
-                )
-            yield ToolEvent(
-                kind="tool_started",
-                payload={
-                    "name": call.name,
-                    "arguments": call.arguments,
-                    "risk": decision.risk,
-                    "needs_confirmation": decision.needs_confirmation,
-                    "tool_run_id": tool_run_id,
-                },
-            )
-            if not decision.auto_execute:
-                if agent_store is None or tool_run_id is None:
-                    result = {"error": "confirmation storage is unavailable"}
-                    yield ToolEvent(kind="tool_error", payload={"name": call.name, "result": result})
-                    return
-                confirmation = agent_store.create_confirmation(
-                    tool_run_id=tool_run_id,
-                    tool_name=call.name,
-                    arguments=call.arguments,
-                    risk=decision.risk,
-                    chat_id=chat_id,
-                )
-                agent_store.finish_tool_run(
-                    tool_run_id,
-                    "pending_confirmation",
-                    {"confirmation_id": confirmation.id},
-                )
-                yield ToolEvent(
-                    kind="confirmation_required",
-                    payload={"confirmation": confirmation.to_dict()},
-                )
-                yield ToolEvent(
-                    kind="text",
-                    payload={"content": "Нужно ваше подтверждение для этого действия."},
-                )
-                return
+            result: dict | None = None
+            stop = False
+            for event in execute_tool(
+                registry,
+                services,
+                call.name,
+                call.arguments,
+                chat_id=chat_id,
+            ):
+                yield ToolEvent(kind=event.kind, payload=event.payload)
+                if event.kind == "confirmation_required":
+                    yield ToolEvent(
+                        kind="text",
+                        payload={"content": "Нужно ваше подтверждение для этого действия."},
+                    )
+                if event.kind in ("tool_finished", "tool_error"):
+                    result = event.payload["result"]
+                stop = stop or event.stop
 
-            result = registry.dispatch(call.name, call.arguments, services)
-            if agent_store is not None and tool_run_id is not None:
-                agent_store.finish_tool_run(
-                    tool_run_id,
-                    "failed" if "error" in result else "succeeded",
-                    result,
+            if stop:
+                return
+            if result is not None:
+                working.append(
+                    {
+                        "role": "tool",
+                        "name": call.name,
+                        "content": _stringify(result),
+                    }
                 )
-            yield ToolEvent(
-                kind="tool_finished" if "error" not in result else "tool_error",
-                payload={"name": call.name, "result": result},
-            )
-            working.append(
-                {
-                    "role": "tool",
-                    "name": call.name,
-                    "content": _stringify(result),
-                }
-            )
         # Loop again so the model can produce the final answer from the results.
 
     yield ToolEvent(kind="text", payload={"content": ""})

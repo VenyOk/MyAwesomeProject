@@ -39,6 +39,11 @@ class LLMProvider(Protocol):
     @thinking.setter
     def thinking(self, value: bool) -> None: ...
 
+    @property
+    def supports_native_tool_calls(self) -> bool:
+        """Whether ``generate_with_tools`` yields OpenAI-style tool calls."""
+        ...
+
     def is_loaded(self) -> bool: ...
 
     def generate(
@@ -60,6 +65,6 @@ class LLMProvider(Protocol):
 
         Returns structured chunks so callers (the orchestrator) get tool calls
         as parsed dicts instead of having to regex-parse provider-specific text.
-        Not all providers implement this; callers should check via hasattr().
+        Callers must use ``supports_native_tool_calls`` before invoking it.
         """
         ...

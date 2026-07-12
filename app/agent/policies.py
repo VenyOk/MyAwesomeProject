@@ -48,6 +48,10 @@ _DEFAULT_RISK: dict[str, str] = {
     "task.list": "read",
     "task.complete": "confirm",
     "task.cancel": "confirm",
+    "task.create_with_reminder": "confirm",
+    "reminder.create": "confirm",
+    "reminder.list": "read",
+    "reminder.cancel": "confirm",
 }
 
 

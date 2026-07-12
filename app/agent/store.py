@@ -63,12 +63,44 @@ class Confirmation:
         return {
             "id": self.id,
             "chat_id": self.chat_id,
+            "tool_run_id": self.tool_run_id,
             "tool_name": self.tool_name,
             "arguments": self.arguments,
             "risk": self.risk,
             "status": self.status,
             "created_at": self.created_at,
             "resolved_at": self.resolved_at,
+        }
+
+
+@dataclass
+class ToolRun:
+    """A persisted execution record used by tool cards and the audit view."""
+
+    id: int
+    workspace_id: int
+    chat_id: int | None
+    message_id: int | None
+    tool_name: str
+    arguments: dict
+    result: dict | None
+    policy_decision: str
+    status: str
+    created_at: str
+    finished_at: str | None
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "chat_id": self.chat_id,
+            "message_id": self.message_id,
+            "tool_name": self.tool_name,
+            "arguments": self.arguments,
+            "result": self.result,
+            "policy_decision": self.policy_decision,
+            "status": self.status,
+            "created_at": self.created_at,
+            "finished_at": self.finished_at,
         }
 
 
@@ -84,6 +116,22 @@ def _row_to_confirmation(row: sqlite3.Row) -> Confirmation:
         status=row["status"],
         created_at=row["created_at"],
         resolved_at=row["resolved_at"],
+    )
+
+
+def _row_to_tool_run(row: sqlite3.Row) -> ToolRun:
+    return ToolRun(
+        id=row["id"],
+        workspace_id=row["workspace_id"],
+        chat_id=row["chat_id"],
+        message_id=row["message_id"],
+        tool_name=row["tool_name"],
+        arguments=json.loads(row["arguments_json"]),
+        result=json.loads(row["result_json"]) if row["result_json"] else None,
+        policy_decision=row["policy_decision"],
+        status=row["status"],
+        created_at=row["created_at"],
+        finished_at=row["finished_at"],
     )
 
 
@@ -133,6 +181,20 @@ class AgentStore:
                 (status, json.dumps(result, ensure_ascii=False), _now(), tool_run_id),
             )
             self._conn.commit()
+
+    def list_tool_runs(self, *, chat_id: int | None = None) -> list[ToolRun]:
+        """Return persisted tool runs newest-first, optionally for one chat."""
+        with self._lock:
+            if chat_id is None:
+                rows = self._conn.execute(
+                    "SELECT * FROM tool_runs ORDER BY id DESC"
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM tool_runs WHERE chat_id=? ORDER BY id DESC",
+                    (chat_id,),
+                ).fetchall()
+        return [_row_to_tool_run(row) for row in rows]
 
     def create_confirmation(
         self,

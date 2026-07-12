@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 from dataclasses import dataclass, field
@@ -59,6 +60,7 @@ class Memory:
             "source_type": self.source_type,
             "source_message_id": self.source_message_id,
             "status": self.status,
+            "embedding_status": self.embedding_status,
             "deleted_at": self.deleted_at,
         }
 
@@ -236,6 +238,66 @@ class MemoryStore:
             ).fetchall()
         return [_row_to_memory(r) for r in rows]
 
+    def recallable(self) -> list[Memory]:
+        """Active, indexed memories that may be used as LLM context."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM memories "
+                "WHERE status = 'active' AND embedding_status = 'ready' "
+                "AND deleted_at IS NULL ORDER BY id ASC"
+            ).fetchall()
+        return [_row_to_memory(r) for r in rows]
+
+    def recallable_count(self) -> int:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS c FROM memories "
+                "WHERE status = 'active' AND embedding_status = 'ready' "
+                "AND deleted_at IS NULL"
+            ).fetchone()
+        return int(row["c"]) if row else 0
+
+    def list_by_source_message(self, message_id: int) -> list[Memory]:
+        """Return non-deleted memories derived from one chat message."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM memories "
+                "WHERE source_message_id = ? AND deleted_at IS NULL "
+                "ORDER BY id ASC",
+                (message_id,),
+            ).fetchall()
+        return [_row_to_memory(r) for r in rows]
+
+    def mark_for_reextraction(self, message_id: int) -> list[Memory]:
+        """Demote active memories derived from an edited source message.
+
+        The resulting candidate rows are deliberately excluded from recall until
+        the edited message has been re-extracted and the user accepts the result.
+        """
+        now = _now()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id FROM memories "
+                "WHERE source_message_id = ? AND status = 'active' "
+                "AND deleted_at IS NULL ORDER BY id ASC",
+                (message_id,),
+            ).fetchall()
+            memory_ids = [row["id"] for row in rows]
+            if not memory_ids:
+                return []
+            placeholders = ", ".join("?" for _ in memory_ids)
+            self._conn.execute(
+                "UPDATE memories SET status = 'candidate', embedding_status = 'pending', "
+                "updated_at = ? WHERE id IN (" + placeholders + ")",
+                (now, *memory_ids),
+            )
+            updated_rows = self._conn.execute(
+                "SELECT * FROM memories WHERE id IN (" + placeholders + ") ORDER BY id ASC",
+                memory_ids,
+            ).fetchall()
+            self._conn.commit()
+        return [_row_to_memory(row) for row in updated_rows]
+
     def update(
         self,
         memory_id: int,
@@ -277,7 +339,14 @@ class MemoryStore:
         return self.get(memory_id) if cur.rowcount else None
 
     def activate(self, memory_id: int) -> Memory | None:
-        return self.update_status(memory_id, "active")
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE memories SET status='active', embedding_status='ready', updated_at=? "
+                "WHERE id=? AND deleted_at IS NULL",
+                (_now(), memory_id),
+            )
+            self._conn.commit()
+        return self.get(memory_id) if cur.rowcount else None
 
     def add_tag(self, memory_id: int, tag: str) -> Memory | None:
         current = self.get(memory_id)
@@ -292,8 +361,8 @@ class MemoryStore:
 
     def delete(self, memory_id: int) -> bool:
         """Soft-delete: set deleted_at and mark status. FAISS rebuild happens
-        in the caller (RecallService) via rebuild_from_store which skips rows
-        with deleted_at IS NOT NULL through all()."""
+        in the caller (RecallService) via rebuild_from_store, which only uses
+        recallable rows."""
         now = _now()
         with self._lock:
             cur = self._conn.execute(
@@ -307,12 +376,38 @@ class MemoryStore:
     def restore(self, memory_id: int) -> Memory | None:
         with self._lock:
             cur = self._conn.execute(
-                "UPDATE memories SET deleted_at=NULL, status='active', updated_at=? "
+                "UPDATE memories SET deleted_at=NULL, status='active', embedding_status='ready', "
+                "updated_at=? "
                 "WHERE id=?",
                 (_now(), memory_id),
             )
             self._conn.commit()
         return self.get(memory_id) if cur.rowcount else None
+
+    def delete_by_source_message(self, message_id: int) -> list[Memory]:
+        """Soft-delete every non-deleted memory derived from one message."""
+        now = _now()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id FROM memories "
+                "WHERE source_message_id = ? AND deleted_at IS NULL ORDER BY id ASC",
+                (message_id,),
+            ).fetchall()
+            memory_ids = [row["id"] for row in rows]
+            if not memory_ids:
+                return []
+            placeholders = ", ".join("?" for _ in memory_ids)
+            self._conn.execute(
+                "UPDATE memories SET deleted_at = ?, status = 'deleted', updated_at = ? "
+                "WHERE id IN (" + placeholders + ")",
+                (now, now, *memory_ids),
+            )
+            deleted_rows = self._conn.execute(
+                "SELECT * FROM memories WHERE id IN (" + placeholders + ") ORDER BY id ASC",
+                memory_ids,
+            ).fetchall()
+            self._conn.commit()
+        return [_row_to_memory(row) for row in deleted_rows]
 
     # ---------------------------- search ----------------------------
 
@@ -325,6 +420,60 @@ class MemoryStore:
                 (like, limit),
             ).fetchall()
         return [_row_to_memory(r) for r in rows]
+
+    def search_lexical(self, query: str, limit: int = 10) -> list[tuple[Memory, float]]:
+        """Find recallable memories through FTS5, falling back to LIKE.
+
+        FTS syntax is built only from word tokens, rather than passing user
+        input through to ``MATCH``. This keeps punctuation such as ``C++`` and
+        quotes from turning into invalid FTS expressions.
+        """
+        limit = max(0, int(limit))
+        if not query.strip() or limit == 0:
+            return []
+
+        terms = re.findall(r"\w+", query, flags=re.UNICODE)
+        if not terms:
+            return self._search_lexical_like(query, limit)
+        match_query = " AND ".join(f'"{term}"' for term in terms)
+
+        try:
+            with self._lock:
+                available = self._conn.execute(
+                    "SELECT 1 FROM sqlite_master "
+                    "WHERE type = 'table' AND name = 'memories_fts'"
+                ).fetchone()
+                if not available:
+                    return self._search_lexical_like(query, limit)
+                rows = self._conn.execute(
+                    "SELECT memories.*, bm25(memories_fts) AS lexical_rank "
+                    "FROM memories_fts JOIN memories ON memories.id = memories_fts.rowid "
+                    "WHERE memories_fts MATCH ? "
+                    "AND memories.status = 'active' "
+                    "AND memories.embedding_status = 'ready' "
+                    "AND memories.deleted_at IS NULL "
+                    "ORDER BY lexical_rank ASC, memories.id DESC LIMIT ?",
+                    (match_query, limit),
+                ).fetchall()
+        except sqlite3.OperationalError:
+            return self._search_lexical_like(query, limit)
+
+        # FTS5's bm25 values are lower-is-better. Positional normalization is
+        # stable across SQLite versions and gives callers a conventional
+        # higher-is-better score without exposing implementation-specific ranks.
+        return [(_row_to_memory(row), 1.0 / position) for position, row in enumerate(rows, 1)]
+
+    def _search_lexical_like(self, query: str, limit: int) -> list[tuple[Memory, float]]:
+        like = f"%{query}%"
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM memories "
+                "WHERE (content LIKE ? OR COALESCE(summary, '') LIKE ? OR tags LIKE ?) "
+                "AND status = 'active' AND embedding_status = 'ready' "
+                "AND deleted_at IS NULL ORDER BY id DESC LIMIT ?",
+                (like, like, like, limit),
+            ).fetchall()
+        return [(_row_to_memory(row), 1.0 / position) for position, row in enumerate(rows, 1)]
 
     def count(self) -> int:
         with self._lock:

@@ -18,6 +18,9 @@ from app.llm.gemma import GemmaLLM
 from app.llm.openai_compatible import OpenAICompatibleLLM
 from app.memory.recall import RecallService
 from app.memory.store import MemoryStore
+from app.jobs.outbox import OutboxStore
+from app.jobs.scheduler import ReminderScheduler, ReminderSchedulerLoop
+from app.tasks.reminders import ReminderStore
 from app.tasks.store import TaskStore
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -37,6 +40,9 @@ class Services:
     task_store: TaskStore
     tool_registry: object  # ToolRegistry; typed loosely to avoid import cycles
     agent_store: AgentStore | None = None
+    reminder_store: ReminderStore | None = None
+    outbox_store: OutboxStore | None = None
+    reminder_scheduler: ReminderScheduler | None = None
 
 
 def build_services(settings: Settings | None = None) -> Services:
@@ -46,6 +52,8 @@ def build_services(settings: Settings | None = None) -> Services:
     store = MemoryStore(settings.db_path)
     chat_store = ChatStore(settings.db_path)
     task_store = TaskStore(settings.db_path)
+    reminder_store = ReminderStore(settings.db_path)
+    outbox_store = OutboxStore(settings.db_path)
 
     # Apply versioned migrations after the stores have created their baseline
     # schema. Enriches the schema (workspace_id, soft delete, curated memory
@@ -54,19 +62,35 @@ def build_services(settings: Settings | None = None) -> Services:
 
     run_migrations(chat_store._conn, settings.db_path)
     agent_store = AgentStore(settings.db_path)
+    reminder_scheduler = ReminderScheduler(
+        reminder_store,
+        outbox_store,
+        quiet_hours_start=settings.quiet_hours_start,
+        quiet_hours_end=settings.quiet_hours_end,
+    )
 
     from app.agent.tool_registry import build_default_registry
     from app.memory.embeddings import Embedder, FaissIndex
 
     embedder = Embedder(settings.embedding_model, settings.embedding_dim)
     index = FaissIndex(
-        settings.embedding_dim, settings.faiss_path, settings.faiss_ids_path
+        settings.embedding_dim,
+        settings.faiss_path,
+        settings.faiss_ids_path,
+        model_name=settings.embedding_model,
     )
-    recall = RecallService(store, embedder, index)
+    recall = RecallService(
+        store,
+        embedder,
+        index,
+        context_token_budget=settings.recall_context_token_budget,
+    )
 
     session = ChatSession()
     if settings.llm_provider == "openai_compatible":
         llm: LLMProvider = OpenAICompatibleLLM(settings)
+    elif settings.llm_provider == "qwen_server":
+        llm = OpenAICompatibleLLM(settings, supports_native_tool_calls=False)
     elif settings.llm_provider == "legacy_gemma":
         llm = GemmaLLM(settings)
     else:
@@ -91,6 +115,9 @@ def build_services(settings: Settings | None = None) -> Services:
         task_store=task_store,
         tool_registry=tool_registry,
         agent_store=agent_store,
+        reminder_store=reminder_store,
+        outbox_store=outbox_store,
+        reminder_scheduler=reminder_scheduler,
     )
 
 
@@ -106,13 +133,28 @@ def create_app(services: Services | None = None) -> FastAPI:
             except Exception as exc:  # noqa: BLE001 - don't crash on startup over embeddings
                 print(f"[second-brain] recall init skipped: {exc}")
         app.state.services = services
-        yield
-        if owns_services:
-            services.store.close()
-            services.chat_store.close()
-            services.task_store.close()
-            if services.agent_store is not None:
-                services.agent_store.close()
+        scheduler_loop: ReminderSchedulerLoop | None = None
+        if services.reminder_scheduler is not None:
+            scheduler_loop = ReminderSchedulerLoop(
+                services.reminder_scheduler,
+                interval_seconds=services.settings.scheduler_interval_seconds,
+            )
+            await scheduler_loop.start()
+        try:
+            yield
+        finally:
+            if scheduler_loop is not None:
+                await scheduler_loop.stop()
+            if owns_services:
+                services.store.close()
+                services.chat_store.close()
+                services.task_store.close()
+                if services.reminder_store is not None:
+                    services.reminder_store.close()
+                if services.outbox_store is not None:
+                    services.outbox_store.close()
+                if services.agent_store is not None:
+                    services.agent_store.close()
 
     app = FastAPI(title="Second Brain", lifespan=lifespan)
     app.include_router(api_router, prefix="/api")

@@ -5,6 +5,8 @@ the source of the JSON schema advertised to the model.
 """
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -15,6 +17,10 @@ class MemorySearchArgs(BaseModel):
 class MemoryCreateArgs(BaseModel):
     content: str = Field(..., description="Что запомнить. Короткое утверждение о пользователе.")
     kind: str = Field(default="fact", description="Тип: fact | preference | decision | idea | person | project")
+    source: Literal["agent", "manual"] = Field(
+        default="agent",
+        description="Источник сохранения: agent для вызова модели, manual для явной команды пользователя.",
+    )
 
 
 class MemoryUpdateArgs(BaseModel):
@@ -39,3 +45,31 @@ class TaskListArgs(BaseModel):
 
 class TaskIdArgs(BaseModel):
     id: int = Field(..., description="ID задачи.")
+
+
+class ReminderCreateArgs(BaseModel):
+    title: str = Field(..., description="Текст напоминания.")
+    scheduled_at: str = Field(
+        ...,
+        description="Точное время в ISO-формате, например 2026-07-15T18:00. Не угадывай дату.",
+    )
+    task_id: int | None = Field(default=None, description="Связанная задача, если она уже создана.")
+    timezone: str | None = Field(default=None, description="Часовой пояс IANA, например Europe/Moscow.")
+
+
+class ReminderListArgs(BaseModel):
+    status: str = Field(default="scheduled", description="Фильтр: scheduled | fired | cancelled. Пустая строка = все.")
+
+
+class ReminderIdArgs(BaseModel):
+    id: int = Field(..., description="ID напоминания.")
+
+
+class TaskWithReminderArgs(BaseModel):
+    title: str = Field(..., description="Короткое название задачи и напоминания.")
+    scheduled_at: str = Field(
+        ...,
+        description="Точное время напоминания в ISO-формате, например 2026-07-15T18:00. Не угадывай дату.",
+    )
+    description: str = Field(default="", description="Детали задачи (необязательно).")
+    timezone: str | None = Field(default=None, description="Часовой пояс IANA, например Europe/Moscow.")

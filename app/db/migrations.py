@@ -221,12 +221,89 @@ def m5_confirmations(conn: sqlite3.Connection) -> None:
     )
 
 
+# --------------------------------------------------------------------------- #
+# Migration 6: idempotent outbox delivery for scheduler recovery.
+# --------------------------------------------------------------------------- #
+def m6_outbox_dedupe(conn: sqlite3.Connection) -> None:
+    if not table_exists(conn, "outbox"):
+        return
+    if not column_exists(conn, "outbox", "dedupe_key"):
+        conn.execute("ALTER TABLE outbox ADD COLUMN dedupe_key TEXT")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_outbox_workspace_dedupe "
+        "ON outbox(workspace_id, dedupe_key) WHERE dedupe_key IS NOT NULL"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Migration 7: lexical index for hybrid memory retrieval.
+#
+# The FTS table uses ``memories`` as external content, so the canonical memory
+# rows remain the source of truth. The triggers keep indexed text in sync and
+# the rebuild covers all rows that existed before this migration.
+# --------------------------------------------------------------------------- #
+def m7_memories_fts(conn: sqlite3.Connection) -> None:
+    if not table_exists(conn, "memories"):
+        return
+
+    try:
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+                content,
+                summary,
+                tags,
+                content='memories',
+                content_rowid='id',
+                tokenize='unicode61'
+            )
+            """
+        )
+    except sqlite3.OperationalError as error:
+        # Some stripped-down SQLite builds omit FTS5. Search falls back to
+        # parameterized LIKE queries in that environment.
+        if "fts5" in str(error).lower():
+            return
+        raise
+
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS memories_fts_ai AFTER INSERT ON memories BEGIN
+            INSERT INTO memories_fts(rowid, content, summary, tags)
+            VALUES (new.id, new.content, new.summary, new.tags);
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS memories_fts_ad AFTER DELETE ON memories BEGIN
+            INSERT INTO memories_fts(memories_fts, rowid, content, summary, tags)
+            VALUES ('delete', old.id, old.content, old.summary, old.tags);
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS memories_fts_au
+        AFTER UPDATE OF content, summary, tags ON memories BEGIN
+            INSERT INTO memories_fts(memories_fts, rowid, content, summary, tags)
+            VALUES ('delete', old.id, old.content, old.summary, old.tags);
+            INSERT INTO memories_fts(rowid, content, summary, tags)
+            VALUES (new.id, new.content, new.summary, new.tags);
+        END
+        """
+    )
+    conn.execute("INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')")
+
+
 MIGRATIONS = (
     ("0001_workspaces", m1_workspaces),
     ("0002_soft_delete", m2_soft_delete),
     ("0003_memories_domain", m3_memories_domain),
     ("0004_tasks_and_friends", m4_tasks_and_friends),
     ("0005_confirmations", m5_confirmations),
+    ("0006_outbox_dedupe", m6_outbox_dedupe),
+    ("0007_memories_fts", m7_memories_fts),
 )
 
 

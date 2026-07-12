@@ -10,6 +10,7 @@ class _NativeToolLLM:
 
     def __init__(self):
         self.thinking = False
+        self.supports_native_tool_calls = True
         self._calls = 0
 
     def is_loaded(self) -> bool:
@@ -67,6 +68,7 @@ def test_orchestrator_native_tool_call_executes_and_finalizes():
 def test_orchestrator_no_tool_call_just_text():
     class _TextOnlyLLM:
         thinking = False
+        supports_native_tool_calls = True
 
         def is_loaded(self):
             return True
