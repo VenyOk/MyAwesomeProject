@@ -9,6 +9,7 @@ import pytest
 from app.jobs.outbox import OutboxStore
 from app.jobs.scheduler import ReminderScheduler, ReminderSchedulerLoop
 from app.tasks.reminders import ReminderStore
+from app.tasks.service import TaskReminderService
 
 
 def test_scheduler_claims_due_reminder_once_and_creates_one_notification(tmp_path):
@@ -136,11 +137,16 @@ def reminder_client(services, tmp_path):
     from fastapi.testclient import TestClient
 
     db_path = tmp_path / "reminders.db"
+    from app.tasks.store import TaskStore
+
+    services.task_store.close()
+    services.task_store = TaskStore(db_path)
     reminders = ReminderStore(db_path)
     outbox = OutboxStore(db_path)
     services.reminder_store = reminders
     services.outbox_store = outbox
     services.reminder_scheduler = ReminderScheduler(reminders, outbox)
+    services.task_reminder_service = TaskReminderService(services.task_store, reminders)
 
     from app.main import create_app
 
@@ -150,6 +156,7 @@ def reminder_client(services, tmp_path):
     finally:
         outbox.close()
         reminders.close()
+        services.task_store.close()
 
 
 def test_reminder_crud_and_notification_acknowledgement(reminder_client):
@@ -230,3 +237,27 @@ def test_confirmed_agent_tool_creates_linked_task_and_reminder(reminder_client):
     result = approved.json()["result"]
     assert result["task"]["title"] == "Отправить отчёт"
     assert result["reminder"]["task_id"] == result["task"]["id"]
+
+
+def test_task_with_reminder_is_consistent_and_completion_cancels_reminder(reminder_client):
+    scheduled_at = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    created = reminder_client.post(
+        "/api/tasks/with-reminder",
+        json={
+            "title": "Подготовить релиз",
+            "description": "Проверить changelog",
+            "scheduled_at": scheduled_at,
+            "timezone": "Europe/Moscow",
+        },
+    )
+
+    assert created.status_code == 200
+    payload = created.json()
+    assert payload["reminder"]["task_id"] == payload["task"]["id"]
+    assert payload["reminder"]["status"] == "scheduled"
+
+    completed = reminder_client.post(f"/api/tasks/{payload['task']['id']}/complete")
+    assert completed.status_code == 200
+    cancelled = reminder_client.get("/api/reminders?status=cancelled")
+    assert cancelled.status_code == 200
+    assert [item["id"] for item in cancelled.json()["reminders"]] == [payload["reminder"]["id"]]

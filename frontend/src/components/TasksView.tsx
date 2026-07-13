@@ -4,8 +4,8 @@ import {
   cancelReminder,
   cancelTask,
   completeTask,
-  createReminder,
   createTask,
+  createTaskWithReminder,
   fmtMoscow,
   listNotifications,
   listReminders,
@@ -83,16 +83,16 @@ export default function TasksView({ onClose }: { onClose: () => void }) {
 
     setAdding(true);
     setError("");
-    let task: Task | null = null;
     try {
-      task = await createTask({ title: taskTitle, due_at: dueAt || null });
+      if (dueAt) {
+        await createTaskWithReminder({ title: taskTitle, scheduled_at: dueAt });
+      } else {
+        await createTask({ title: taskTitle });
+      }
       setTitle("");
       setDueAt("");
-      if (dueAt) {
-        await createReminder({ title: task.title, scheduled_at: dueAt, task_id: task.id });
-      }
     } catch (err) {
-      setError(task ? "Задача создана, но напоминание не удалось добавить." : (err as Error).message);
+      setError((err as Error).message);
     } finally {
       setAdding(false);
       await refresh();

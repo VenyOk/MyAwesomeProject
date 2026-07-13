@@ -4,6 +4,8 @@ import Composer from "./components/Composer";
 import Message from "./components/Message";
 import MemoryView from "./components/MemoryView";
 import TasksView from "./components/TasksView";
+import TodayView from "./components/TodayView";
+import SettingsView from "./components/SettingsView";
 import {
   type Chat,
   type ChatEvent,
@@ -65,7 +67,7 @@ export default function App() {
   const [toolRuns, setToolRuns] = useState<ToolRun[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">(loadTheme);
-  const [view, setView] = useState<"chat" | "memory" | "tasks">("chat");
+  const [view, setView] = useState<"chat" | "memory" | "today" | "settings" | "tasks">("chat");
   const [messageNotice, setMessageNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -540,6 +542,8 @@ export default function App() {
         onDeleteFolder={removeFolder}
         onThemeChange={setTheme}
         onOpenMemory={() => { setView("memory"); setSidebarOpen(false); }}
+        onOpenToday={() => { setView("today"); setSidebarOpen(false); }}
+        onOpenSettings={() => { setView("settings"); setSidebarOpen(false); }}
         onOpenTasks={() => { setView("tasks"); setSidebarOpen(false); }}
         onClose={() => setSidebarOpen(false)}
       />
@@ -551,6 +555,14 @@ export default function App() {
       ) : view === "tasks" ? (
         <main className="chat">
           <TasksView onClose={() => setView("chat")} />
+        </main>
+      ) : view === "today" ? (
+        <main className="chat">
+          <TodayView onClose={() => setView("chat")} />
+        </main>
+      ) : view === "settings" ? (
+        <main className="chat">
+          <SettingsView onClose={() => setView("chat")} />
         </main>
       ) : (
       <main className="chat">

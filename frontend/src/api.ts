@@ -205,6 +205,33 @@ export function getHealth(): Promise<Health> {
   return jget<Health>(`${BASE}/health`);
 }
 
+export type AppSettings = {
+  timezone: string;
+  quiet_hours_start: string | null;
+  quiet_hours_end: string | null;
+  model: string;
+  scheduler_interval_seconds: number;
+};
+
+export function getSettings(): Promise<AppSettings> {
+  return jget<AppSettings>(`${BASE}/settings`);
+}
+
+export function updateSettings(patch: {
+  timezone?: string;
+  quiet_hours_start?: string | null;
+  quiet_hours_end?: string | null;
+}): Promise<AppSettings> {
+  return fetch(`${BASE}/settings`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  }).then(async (response) => {
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json() as Promise<AppSettings>;
+  });
+}
+
 // ---------------------------- memories ----------------------------
 
 export type MemoryStatus = "candidate" | "active" | "superseded" | "deleted";
@@ -250,6 +277,12 @@ export function createTask(task: {
   title: string; description?: string; due_at?: string | null; priority?: number;
 }): Promise<Task> {
   return jpost<Task>(`${BASE}/tasks`, task);
+}
+
+export function createTaskWithReminder(task: {
+  title: string; description?: string; scheduled_at: string; timezone?: string; priority?: number;
+}): Promise<{ task: Task; reminder: Reminder }> {
+  return jpost<{ task: Task; reminder: Reminder }>(`${BASE}/tasks/with-reminder`, task);
 }
 
 export async function updateTask(id: number, patch: Partial<Pick<Task, "title" | "description" | "due_at" | "priority">>): Promise<Task> {

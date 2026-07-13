@@ -19,6 +19,8 @@ type Props = {
   onDeleteFolder: (id: number) => Promise<void>;
   onThemeChange: (t: "dark" | "light") => void;
   onOpenMemory: () => void;
+  onOpenToday: () => void;
+  onOpenSettings: () => void;
   onOpenTasks: () => void;
   onClose: () => void;
 };
@@ -27,7 +29,7 @@ export default function Sidebar(props: Props) {
   const {
     chats, folders, currentId, health, theme,
     onSelect, onNew, onDelete, onRename, onTogglePin, onMove,
-    onCreateFolder, onRenameFolder, onDeleteFolder, onThemeChange, onOpenMemory, onOpenTasks, onClose,
+    onCreateFolder, onRenameFolder, onDeleteFolder, onThemeChange, onOpenMemory, onOpenToday, onOpenSettings, onOpenTasks, onClose,
   } = props;
 
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -188,6 +190,8 @@ export default function Sidebar(props: Props) {
       <div className="sidebar-actions">
         <button className="new-chat" onClick={() => onNew()}>+ Новый чат</button>
         <button className="open-memory" onClick={onOpenMemory} title="Просмотреть и управлять памятью">🧠 Память</button>
+        <button className="open-memory" onClick={onOpenToday} title="Открыть обзор на сегодня">☼ Сегодня</button>
+        <button className="open-memory" onClick={onOpenSettings} title="Настройки времени и уведомлений">⚙ Настройки</button>
         <button className="open-memory" onClick={onOpenTasks} title="Просмотреть задачи">✓ Задачи</button>
       </div>
 

@@ -296,6 +296,24 @@ def m7_memories_fts(conn: sqlite3.Connection) -> None:
     conn.execute("INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')")
 
 
+# --------------------------------------------------------------------------- #
+# Migration 8: persistent local workspace settings.
+# --------------------------------------------------------------------------- #
+def m8_workspace_settings(conn: sqlite3.Connection) -> None:
+    _exec(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS workspace_settings (
+            workspace_id INTEGER PRIMARY KEY,
+            timezone TEXT NOT NULL,
+            quiet_hours_start TEXT,
+            quiet_hours_end TEXT,
+            updated_at TEXT NOT NULL
+        );
+        """,
+    )
+
+
 MIGRATIONS = (
     ("0001_workspaces", m1_workspaces),
     ("0002_soft_delete", m2_soft_delete),
@@ -304,6 +322,7 @@ MIGRATIONS = (
     ("0005_confirmations", m5_confirmations),
     ("0006_outbox_dedupe", m6_outbox_dedupe),
     ("0007_memories_fts", m7_memories_fts),
+    ("0008_workspace_settings", m8_workspace_settings),
 )
 
 

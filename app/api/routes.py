@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from datetime import time
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse, StreamingResponse
@@ -61,6 +63,14 @@ class CreateTaskRequest(BaseModel):
     priority: int = 0
 
 
+class CreateTaskWithReminderRequest(BaseModel):
+    title: str
+    description: str = ""
+    scheduled_at: str
+    timezone: str | None = None
+    priority: int = 0
+
+
 class UpdateTaskRequest(BaseModel):
     title: str | None = None
     description: str | None = None
@@ -83,6 +93,12 @@ class UpdateReminderRequest(BaseModel):
     recurrence_rule: str | None = None
 
 
+class UpdateSettingsRequest(BaseModel):
+    timezone: str | None = None
+    quiet_hours_start: str | None = None
+    quiet_hours_end: str | None = None
+
+
 def _services(request: Request):
     return request.app.state.services
 
@@ -92,6 +108,13 @@ def _reminder_store(request: Request):
     if store is None:
         raise HTTPException(status_code=503, detail="Reminder storage is unavailable")
     return store
+
+
+def _task_reminder_service(request: Request):
+    service = getattr(_services(request), "task_reminder_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="Task/reminder storage is unavailable")
+    return service
 
 
 def _outbox_store(request: Request):
@@ -108,6 +131,24 @@ def _validate_reminder_time(value: str, timezone_name: str) -> None:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _validate_timezone(value: str) -> str:
+    try:
+        ZoneInfo(value)
+    except ZoneInfoNotFoundError:
+        raise HTTPException(status_code=422, detail="timezone must be a valid IANA timezone") from None
+    return value
+
+
+def _normalize_clock(value: str | None) -> str | None:
+    if value in (None, ""):
+        return None
+    try:
+        parsed = time.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="quiet hours must use HH:MM") from None
+    return parsed.strftime("%H:%M")
+
+
 @router.get("/health")
 def health(request: Request):
     services = _services(request)
@@ -120,6 +161,45 @@ def health(request: Request):
         "index_size": services.recall.index.size,
         "chats": len(services.chat_store.list_chats()),
     }
+
+
+@router.get("/settings")
+def get_settings(request: Request):
+    services = _services(request)
+    return {
+        "timezone": services.settings.timezone,
+        "quiet_hours_start": services.settings.quiet_hours_start,
+        "quiet_hours_end": services.settings.quiet_hours_end,
+        "model": services.settings.model_id,
+        "scheduler_interval_seconds": services.settings.scheduler_interval_seconds,
+    }
+
+
+@router.patch("/settings")
+def update_settings(payload: UpdateSettingsRequest, request: Request):
+    services = _services(request)
+    current = {
+        "timezone": services.settings.timezone,
+        "quiet_hours_start": services.settings.quiet_hours_start,
+        "quiet_hours_end": services.settings.quiet_hours_end,
+    }
+    fields = payload.model_dump(exclude_unset=True)
+    timezone_name = _validate_timezone(fields.get("timezone", current["timezone"]))
+    quiet_start = _normalize_clock(fields.get("quiet_hours_start", current["quiet_hours_start"]))
+    quiet_end = _normalize_clock(fields.get("quiet_hours_end", current["quiet_hours_end"]))
+    if (quiet_start is None) != (quiet_end is None):
+        raise HTTPException(status_code=422, detail="quiet hours require both start and end")
+
+    services.settings.timezone = timezone_name
+    services.settings.quiet_hours_start = quiet_start
+    services.settings.quiet_hours_end = quiet_end
+    settings_store = getattr(services, "settings_store", None)
+    if settings_store is not None:
+        settings_store.save(timezone_name, quiet_start, quiet_end)
+    scheduler = getattr(services, "reminder_scheduler", None)
+    if scheduler is not None:
+        scheduler.set_quiet_hours(quiet_start, quiet_end)
+    return get_settings(request)
 
 
 # ---------------------------- chats ----------------------------
@@ -381,6 +461,28 @@ def create_task(payload: CreateTaskRequest, request: Request):
     return task.to_dict()
 
 
+@router.post("/tasks/with-reminder")
+def create_task_with_reminder(payload: CreateTaskWithReminderRequest, request: Request):
+    services = _services(request)
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="title must not be empty")
+    timezone_name = payload.timezone or services.settings.timezone
+    _validate_reminder_time(payload.scheduled_at, timezone_name)
+    task, reminder = _task_reminder_service(request).create_with_reminder(
+        title=title,
+        description=payload.description,
+        scheduled_at=payload.scheduled_at,
+        priority=payload.priority,
+        timezone_name=timezone_name,
+    )
+    scheduler = getattr(services, "reminder_scheduler", None)
+    if scheduler is not None:
+        scheduler.tick()
+        reminder = _reminder_store(request).get(reminder.id) or reminder
+    return {"task": task.to_dict(), "reminder": reminder.to_dict()}
+
+
 @router.get("/tasks/{task_id}")
 def get_task(task_id: int, request: Request):
     task = _services(request).task_store.get(task_id)
@@ -408,17 +510,25 @@ def update_task(task_id: int, payload: UpdateTaskRequest, request: Request):
 
 @router.post("/tasks/{task_id}/complete")
 def complete_task(task_id: int, request: Request):
-    task = _services(request).task_store.complete(task_id)
+    services = _services(request)
+    task = services.task_store.complete(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Open task not found")
+    task_reminder_service = getattr(services, "task_reminder_service", None)
+    if task_reminder_service is not None:
+        task_reminder_service.cancel_linked_reminders(task_id)
     return task.to_dict()
 
 
 @router.post("/tasks/{task_id}/cancel")
 def cancel_task(task_id: int, request: Request):
-    task = _services(request).task_store.cancel(task_id)
+    services = _services(request)
+    task = services.task_store.cancel(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Open task not found")
+    task_reminder_service = getattr(services, "task_reminder_service", None)
+    if task_reminder_service is not None:
+        task_reminder_service.cancel_linked_reminders(task_id)
     return task.to_dict()
 
 

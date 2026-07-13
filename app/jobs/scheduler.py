@@ -27,6 +27,11 @@ class ReminderScheduler:
         self.quiet_hours_end = _parse_clock(quiet_hours_end)
         self.workspace_id = workspace_id
 
+    def set_quiet_hours(self, start: str | None, end: str | None) -> None:
+        """Apply validated quiet-hour values to the live scheduler."""
+        self.quiet_hours_start = _parse_clock(start)
+        self.quiet_hours_end = _parse_clock(end)
+
     def tick(self, now: str | None = None) -> int:
         """Process all currently due reminders exactly once.
 

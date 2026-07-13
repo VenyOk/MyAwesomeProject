@@ -208,6 +208,31 @@ class ReminderStore:
             self._conn.commit()
         return self.get(reminder_id) if cur.rowcount else None
 
+    def cancel_for_task(self, task_id: int, workspace_id: int = 1) -> list[Reminder]:
+        """Cancel all scheduled reminders linked to a task."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id FROM reminders WHERE workspace_id=? AND task_id=? AND status='scheduled'",
+                (workspace_id, task_id),
+            ).fetchall()
+            if not rows:
+                return []
+            ids = [int(row["id"]) for row in rows]
+            placeholders = ",".join("?" * len(ids))
+            self._conn.execute(
+                f"UPDATE reminders SET status='cancelled' "
+                f"WHERE workspace_id=? AND task_id=? AND status='scheduled' "
+                f"AND id IN ({placeholders})",  # noqa: S608
+                (workspace_id, task_id, *ids),
+            )
+            self._conn.commit()
+        cancelled: list[Reminder] = []
+        for reminder_id in ids:
+            reminder = self.get(reminder_id)
+            if reminder is not None:
+                cancelled.append(reminder)
+        return cancelled
+
     def claim_due(
         self,
         now_utc: str | None = None,

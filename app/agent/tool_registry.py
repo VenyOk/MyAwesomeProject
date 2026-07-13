@@ -146,6 +146,9 @@ def _handle_task_complete(services: Any, args) -> dict:
     task = services.task_store.complete(args.id)
     if task is None:
         return {"error": "open task not found"}
+    task_reminder_service = getattr(services, "task_reminder_service", None)
+    if task_reminder_service is not None:
+        task_reminder_service.cancel_linked_reminders(task.id)
     return {"id": task.id, "status": task.status, "title": task.title}
 
 
@@ -153,6 +156,9 @@ def _handle_task_cancel(services: Any, args) -> dict:
     task = services.task_store.cancel(args.id)
     if task is None:
         return {"error": "open task not found"}
+    task_reminder_service = getattr(services, "task_reminder_service", None)
+    if task_reminder_service is not None:
+        task_reminder_service.cancel_linked_reminders(task.id)
     return {"id": task.id, "status": task.status, "title": task.title}
 
 
@@ -195,17 +201,26 @@ def _handle_reminder_cancel(services: Any, args) -> dict:
 
 def _handle_task_create_with_reminder(services: Any, args) -> dict:
     timezone_name = args.timezone or services.settings.timezone
-    task = services.task_store.create(
-        title=args.title,
-        description=args.description,
-        due_at=args.scheduled_at,
-    )
-    reminder = _get_reminder_store(services).create(
-        args.title,
-        args.scheduled_at,
-        task_id=task.id,
-        timezone_name=timezone_name,
-    )
+    task_reminder_service = getattr(services, "task_reminder_service", None)
+    if task_reminder_service is not None:
+        task, reminder = task_reminder_service.create_with_reminder(
+            title=args.title,
+            description=args.description,
+            scheduled_at=args.scheduled_at,
+            timezone_name=timezone_name,
+        )
+    else:
+        task = services.task_store.create(
+            title=args.title,
+            description=args.description,
+            due_at=args.scheduled_at,
+        )
+        reminder = _get_reminder_store(services).create(
+            args.title,
+            args.scheduled_at,
+            task_id=task.id,
+            timezone_name=timezone_name,
+        )
     scheduler = getattr(services, "reminder_scheduler", None)
     if scheduler is not None:
         scheduler.tick()

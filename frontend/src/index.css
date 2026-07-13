@@ -942,10 +942,10 @@ html.light .edit-actions button:first-child { color: #fff; }
 
 
 /* ===== Sidebar action buttons ===== */
-.sidebar-actions { display: flex; gap: 6px; margin-bottom: 8px; }
-.sidebar-actions .new-chat { flex: 1; }
+.sidebar-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
+.sidebar-actions .new-chat { grid-column: 1 / -1; }
 .open-memory {
-  padding: 8px 10px; border: 1px solid var(--border); background: var(--bg-elev);
+  width: 100%; padding: 8px 10px; border: 1px solid var(--border); background: var(--bg-elev);
   color: var(--text); border-radius: 8px; cursor: pointer; font-size: 13px; white-space: nowrap;
 }
 .open-memory:hover { background: var(--bg-hover, #1f2937); }
@@ -953,6 +953,33 @@ html.light .edit-actions button:first-child { color: #fff; }
 /* ===== Memory view ===== */
 .memory-view { display: flex; flex-direction: column; height: 100%; max-width: 760px; margin: 0 auto; width: 100%; }
 .tasks-view { display: flex; flex-direction: column; height: 100%; max-width: 760px; margin: 0 auto; width: 100%; }
+.today-view { display: flex; flex-direction: column; height: 100%; max-width: 760px; margin: 0 auto; width: 100%; overflow-y: auto; }
+.today-hero { margin: 20px 4px 12px; padding: 18px; border: 1px solid var(--border); border-radius: 14px; background: linear-gradient(135deg, var(--panel-2), var(--accent-soft)); }
+.today-kicker { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.today-hero h1 { margin: 7px 0 5px; font-size: 24px; }
+.today-hero p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.today-section { margin: 8px 4px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--panel-2); }
+.today-section:first-of-type { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.today-row { display: flex; align-items: center; gap: 10px; padding: 10px 11px; border-top: 1px solid var(--border-soft); }
+.today-row > div { min-width: 0; flex: 1; }
+.today-row strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.today-row span { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; }
+.today-row button { border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: 12px; padding: 4px 7px; white-space: nowrap; }
+.today-row button:hover { border-color: var(--accent); color: var(--text); }
+.today-row button:disabled { cursor: default; opacity: .55; }
+.today-empty { padding: 12px 11px; color: var(--muted); font-size: 13px; }
+.settings-view { display: flex; flex-direction: column; height: 100%; max-width: 760px; margin: 0 auto; width: 100%; overflow-y: auto; }
+.settings-card { margin: 24px 4px; padding: 20px; border: 1px solid var(--border); border-radius: 14px; background: var(--panel-2); }
+.settings-kicker { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.settings-card h1 { margin: 7px 0 6px; font-size: 24px; }
+.settings-card p { margin: 0 0 20px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.settings-card label { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; color: var(--muted); font-size: 13px; }
+.settings-card input { padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev); color: var(--text); font: inherit; }
+.settings-time-row { display: flex; gap: 12px; }
+.settings-time-row label { flex: 1; }
+.settings-save { margin-top: 20px; padding: 9px 14px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; font: inherit; }
+.settings-save:disabled { cursor: default; opacity: .55; }
+.settings-success { margin-top: 10px; color: #54c995; font-size: 13px; }
 .memory-topbar { display: flex; align-items: center; gap: 10px; padding: 12px 8px; border-bottom: 1px solid var(--border); }
 .back-btn { padding: 6px 12px; background: transparent; border: 1px solid var(--border); color: var(--text); border-radius: 8px; cursor: pointer; }
 .memory-title { font-size: 18px; font-weight: 600; }

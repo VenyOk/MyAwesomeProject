@@ -838,13 +838,7 @@ backup базы.
 
 ### Этап 0. Стабилизация текущего проекта
 
-- исправить синтаксический дубль в `frontend/src/App.tsx`;
-- восстановить воспроизводимую установку Python и Node dependencies;
-- добиться зелёных backend tests и frontend build;
-- зафиксировать baseline screenshots;
-- добавить `.env.example`.
-
-Результат: текущий прототип воспроизводимо запускается и тестируется.
+Статус: завершён. Исправлен frontend, добавлены инструкции запуска и `.env.example`, backend-тесты и frontend build проходят.
 
 ### Этап 1. Qwen как отдельный сервис
 
@@ -860,50 +854,30 @@ backup базы.
 
 ### Этап 2. Версионированная база
 
-- добавить `schema_migrations`;
-- добавить local workspace;
-- расширить messages;
-- создать новые memories, tasks, reminders, tool_runs, summaries и outbox;
-- мигрировать существующие записи без потери данных;
-- добавить backup перед migration.
-
-Результат: схема поддерживает предметную область и дальнейшее развитие.
+Статус: завершён. Версионированные миграции, local workspace и предметные таблицы memories, tasks, reminders, tool_runs, summaries и outbox работают без потери существующих данных.
 
 ### Этап 3. Курируемая память
 
-- прекратить безусловное сохранение каждого сообщения;
-- реализовать extractor;
-- добавить candidate/active/superseded;
-- связать память с сообщениями;
-- реализовать Memory UI;
-- добавить edit/delete propagation;
-- заменить или сравнить embedding model;
-- реализовать hybrid retrieval.
-
-Результат: модель запоминает важное, а пользователь контролирует память.
+Статус: завершён. Реализованы кандидаты и жизненный цикл памяти, Memory UI, propagation при изменении и удалении, embeddings, hybrid retrieval и ограниченный контекст.
 
 ### Этап 4. Orchestrator и инструменты
 
-- реализовать typed registry;
-- добавить policy engine;
-- добавить tool loop;
-- реализовать confirmations;
-- добавить tool cards и audit UI;
-- перенести slash-команды на те же application services.
+Статус: частично завершён.
 
-Результат: естественный текст и команды используют одну бизнес-логику.
+Осталось:
+
+- перенести `/tag`, `/wipe`, `/clear` и остальные ещё не мигрированные slash-команды на общие application services;
+- проверить, что для каждой команды сохраняются единые policy, confirmation и audit-пути.
 
 ### Этап 5. Задачи и напоминания
 
-- CRUD задач;
-- распознавание задач и дат;
-- scheduler;
-- outbox;
-- UI Today/Tasks;
-- обработка missed reminders;
-- timezone и quiet hours.
+Статус: почти завершён. CRUD, typed tools, атомарный task/reminder service, автоматическая отмена связанных напоминаний, scheduler, outbox, missed reminders, Today/Tasks UI и persistent settings (timezone/quiet hours) уже реализованы.
 
-Результат: локальные действия и уведомления работают после перезапуска.
+Осталось:
+
+- проверить end-to-end распознавание задач и дат через реальный LLM provider.
+
+Ближайший рабочий пакет: миграция оставшихся slash-команд и проверка LLM extraction.
 
 ### Этап 6. Summaries и управление контекстом
 

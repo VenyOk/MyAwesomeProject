@@ -21,7 +21,9 @@ from app.memory.store import MemoryStore
 from app.jobs.outbox import OutboxStore
 from app.jobs.scheduler import ReminderScheduler, ReminderSchedulerLoop
 from app.tasks.reminders import ReminderStore
+from app.tasks.service import TaskReminderService
 from app.tasks.store import TaskStore
+from app.settings.store import SettingsStore
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = PROJECT_ROOT / "web"
@@ -41,8 +43,10 @@ class Services:
     tool_registry: object  # ToolRegistry; typed loosely to avoid import cycles
     agent_store: AgentStore | None = None
     reminder_store: ReminderStore | None = None
+    task_reminder_service: TaskReminderService | None = None
     outbox_store: OutboxStore | None = None
     reminder_scheduler: ReminderScheduler | None = None
+    settings_store: SettingsStore | None = None
 
 
 def build_services(settings: Settings | None = None) -> Services:
@@ -53,6 +57,7 @@ def build_services(settings: Settings | None = None) -> Services:
     chat_store = ChatStore(settings.db_path)
     task_store = TaskStore(settings.db_path)
     reminder_store = ReminderStore(settings.db_path)
+    task_reminder_service = TaskReminderService(task_store, reminder_store)
     outbox_store = OutboxStore(settings.db_path)
 
     # Apply versioned migrations after the stores have created their baseline
@@ -61,6 +66,18 @@ def build_services(settings: Settings | None = None) -> Services:
     from app.db.migrations import run_migrations
 
     run_migrations(chat_store._conn, settings.db_path)
+    settings_store = SettingsStore(settings.db_path)
+    stored_settings = settings_store.get()
+    if stored_settings is None:
+        settings_store.save(
+            settings.timezone,
+            settings.quiet_hours_start,
+            settings.quiet_hours_end,
+        )
+    else:
+        settings.timezone = stored_settings["timezone"]
+        settings.quiet_hours_start = stored_settings["quiet_hours_start"]
+        settings.quiet_hours_end = stored_settings["quiet_hours_end"]
     agent_store = AgentStore(settings.db_path)
     reminder_scheduler = ReminderScheduler(
         reminder_store,
@@ -116,8 +133,10 @@ def build_services(settings: Settings | None = None) -> Services:
         tool_registry=tool_registry,
         agent_store=agent_store,
         reminder_store=reminder_store,
+        task_reminder_service=task_reminder_service,
         outbox_store=outbox_store,
         reminder_scheduler=reminder_scheduler,
+        settings_store=settings_store,
     )
 
 
@@ -155,6 +174,8 @@ def create_app(services: Services | None = None) -> FastAPI:
                     services.outbox_store.close()
                 if services.agent_store is not None:
                     services.agent_store.close()
+                if services.settings_store is not None:
+                    services.settings_store.close()
 
     app = FastAPI(title="Second Brain", lifespan=lifespan)
     app.include_router(api_router, prefix="/api")
